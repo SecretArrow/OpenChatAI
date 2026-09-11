@@ -1,0 +1,112 @@
+name: Auto Fix
+
+# Perbaiki kegagalan build secara otomatis:
+# 1) Selalu buka/update issue berisi ringkasan error.
+# 2) Bila secret AI_API_KEY tersedia (opsional), panggil LLM untuk menghasilkan
+#    patch, commit & push ke main, sehingga Android CI terpicu ulang.
+# Catatan: agent (GLM) juga memantau CI dan mendorong fix — workflow ini
+# menambah lapisan perbaikan otomatis di sisi repo.
+
+on:
+  workflow_run:
+    workflows: [ "Android CI" ]
+    types: [ completed ]
+
+permissions:
+  contents: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: autofix-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.actor.login != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout failing commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Collect failed logs
+        id: logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          mkdir -p .ci
+          # Ambil job yang gagal beserta lognya
+          gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" > .ci/jobs.json
+          FAILED_IDS=$(node -e '
+            const j=require("./.ci/jobs.json");
+            const ids=(j.jobs||[]).filter(x=>x.conclusion==="failure").map(x=>x.id);
+            console.log(ids.join(" "));
+          ')
+          LOG_FILE=.ci/failed-logs.txt
+          : > "$LOG_FILE"
+          for id in $FAILED_IDS; do
+            echo "===== JOB $id =====" >> "$LOG_FILE"
+            gh api "repos/$REPO/actions/jobs/$id/logs" >> "$LOG_FILE" 2>/dev/null || true
+          done
+          # Potong log agar hemat token (ambil bagian akhir yang biasanya berisi error)
+          tail -c 60000 "$LOG_FILE" > .ci/failed-logs-trim.txt || true
+          echo "logs_ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize failure (always)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          {
+            echo "## Android CI failed 🔴"
+            echo ""
+            echo "- Commit: $HEAD_SHA"
+            echo "- [Run logs](https://github.com/$REPO/actions/runs/${{ github.event.workflow_run.id }})"
+            echo ""
+            echo '```'
+            grep -E "(^|: )(e: |error:|FAILURE:|What went wrong|Execution failed)" .ci/failed-logs.txt | head -40 || tail -60 .ci/failed-logs.txt
+            echo '```'
+          } > .ci/issue-body.md
+          ISSUE=$(gh issue list -R "$REPO" --state open --label ci-failure --json number --jq '.[0].number' || true)
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" -R "$REPO" --body-file .ci/issue-body.md
+          else
+            gh issue create -R "$REPO" --title "Android CI failure (auto-reported)" \
+              --label ci-failure --body-file .ci/issue-body.md || true
+          fi
+
+      - name: Attempt AI auto-fix
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_BASE_URL: ${{ vars.AI_BASE_URL }}
+          AI_MODEL: ${{ vars.AI_MODEL }}
+        run: node .github/scripts/ci-autofix.mjs
+
+      - name: Commit & push fixes
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+        run: |
+          if [ -z "$AI_API_KEY" ]; then
+            echo "AI_API_KEY not set — skip auto-fix push."
+            exit 0
+          fi
+          if [[ -n "$(git status --porcelain -- . ':!.ci')" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A -- . ':!.ci'
+            git commit -m "ci: auto-fix build failure [skip ci]"
+            git push origin HEAD:main
+          else
+            echo "No fixes produced by AI autofix."
+          fi

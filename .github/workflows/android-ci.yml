@@ -1,0 +1,56 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle (cache)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Build release APK (debug-signed)
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Collect APKs
+        run: |
+          mkdir -p apks
+          cp app/build/outputs/apk/debug/app-debug.apk apks/OpenChatAI-debug.apk
+          cp app/build/outputs/apk/release/app-release.apk apks/OpenChatAI-release.apk
+          ls -la apks
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenChatAI-APKs
+          path: apks/*.apk
+          if-no-files-found: error
+          retention-days: 30

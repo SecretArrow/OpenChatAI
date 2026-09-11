@@ -1,1 +1,94 @@
-# OpenChatAI
+# Open Chat AI
+
+> **"Saya cukup chat dengan AI, lalu AI mengerjakan project saya."**
+
+**Open Chat AI** adalah aplikasi Android **AI Coding Agent** dengan pengalaman utama seperti aplikasi chat AI modern — bukan IDE, bukan CLI wrapper. Chat adalah pusat pengalaman; agent engine bekerja di background untuk membaca, membuat, mengubah, dan mengelola project Anda.
+
+![CI](https://github.com/SecretArrow/OpenChatAI/actions/workflows/android-ci.yml/badge.svg)
+
+## Fitur
+
+### Chat (fokus utama)
+- Streaming AI response, Markdown, code blocks + syntax layout, copy response/code
+- Regenerate, Retry, Stop generation, Edit message, lanjut percakapan
+- Riwayat percakapan lokal (Today/Yesterday), percakapan per-project
+- Auto-scroll pintar, typing indicator, status jaringan & model
+
+### AI Provider
+- **Local**: Ollama (`http://127.0.0.1:11434`) & **Remote Ollama** (mis. `http://192.168.1.100:11434`)
+- **Cloud**: OpenAI, Anthropic (Claude), Google (Gemini), Custom OpenAI-compatible
+- Deteksi model otomatis, connection status, model selector dari chat
+
+### Agent Engine
+- Arsitektur modular: `GUI → AgentOrchestrator → Engine`
+- **OpenCode engine** (opsional): hubungkan ke server OpenCode (`opencode serve`) via HTTP; bila tidak tersedia, otomatis fallback
+- **Built-in agent**: tool loop ter-sandbox — `list_files`, `read_file`, `write_file`, `delete_file`, `search`, `run_command` — dibatasi workspace, maksimum iterasi dapat diatur
+- Aktivitas agent ditampilkan manusiawi (`✓ Analyzing project`, `⏳ Installing dependencies`), bukan raw CLI output
+
+### Terminal (hidden by default)
+- Embedded Linux terminal (sh/mksh) — toggle `Terminal ▼` di bawah chat
+- Multi-session, command history, copy/paste, selection, clear, ANSI strip, monospace + font size
+- Environment `PATH` benar + tambahan PATH kustom (mis. runtime Termux untuk `node`/`python3` bila tersedia di perangkat)
+- **Background Process Manager**: proses `npm run dev`, `node server.js`, dll. tetap hidup saat kembali ke Chat — PID, port terdeteksi, durasi, output berbatas, stop/restart, auto-restart opsional, foreground service
+
+### Keamanan
+- Workspace sandbox: operasi file agent dibatasi direktori project
+- API key disimpan via **EncryptedSharedPreferences** (Android Keystore)
+- Eksekusi command hanya lewat ProcessManager + blocklist berbahaya (`rm -rf /`, fork bomb, dll.)
+
+## Build
+
+CI/CD penuh via **GitHub Actions** — tidak perlu build lokal:
+
+| Workflow | Trigger | Hasil |
+|---|---|---|
+| `Android CI` | push/PR ke `main` | APK debug + release (artifact `OpenChatAI-APKs`) |
+| `Release` | tag `v*` | GitHub Release berisi `OpenChatAI-release.apk` |
+| `Auto Fix` | CI gagal | Issue berisi ringkasan error + (opsional) AI auto-fix & push patch |
+
+Untuk auto-fix AI, tambahkan repo secret `AI_API_KEY` (+ opsional vars `AI_BASE_URL`, `AI_MODEL`, format OpenAI-compatible).
+
+## Arsitektur
+
+```text
+Open Chat AI GUI (Compose, chat-first)
+        │
+        ▼
+  AgentOrchestrator ──► AiProvider (Ollama / OpenAI / Anthropic / Google / Custom)
+        │
+        ├──► OpenCodeRuntime (client HTTP server OpenCode, opsional)
+        ├──► BuiltInAgent (tool loop sandboxed)
+        │
+        ▼
+  ProcessManager / TerminalHost ──► Files · Shell · Git (workspace sandbox)
+```
+
+Struktur modul (single-module, paket modular):
+
+```text
+com.openchai.app/          MainActivity, AppContainer (DI), AgentOrchestrator
+com.openchai.core.model/   ChatMessage, Conversation, Project, ModelInfo, ...
+com.openchai.core.ai/      AiProvider + StreamEvent
+com.openchai.core.agent/   AgentEngine + AgentEvent + CommandRunner
+com.openchai.core.*/       settings, runtime, terminal, data (kontrak)
+com.openchai.app.ai/       Ollama/OpenAI/Anthropic/Google/Custom providers
+com.openchai.agent/        BuiltInAgent + tools + OpenCode client/runtime
+com.openchai.runtime/      AndroidProcessManager, ShellEnvironment
+com.openchai.terminal/     TerminalManager, Ansi
+com.openchai.app.data/     JSON conversation store, DataStore settings, secure store
+com.openchai.app.ui/       chat, projects, settings, terminal, theme, navigation
+```
+
+## Catatan runtime
+
+- Terminal menjalankan shell Android (`/system/bin/sh`, fallback bash bila ada). Utilitas Unix (`ls`, `cp`, `grep`, `find`, `tar`, ...) tersedia via toybox.
+- `node`, `python3`, `git`, dll. **tidak dibundel** dalam APK demi ukuran & lisensi. Aplikasi mendeteksi tool di `PATH` dan mendukung **PATH tambahan** di Settings → Runtime (mis. `/data/data/com.termux/files/usr/bin` untuk integrasi Termux), atau gunakan **Remote Ollama** + cloud provider bila perangkat terbatas.
+- APK release di CI ditandatangani debug key agar mudah dipasang; gunakan keystore sendiri untuk distribusi publik.
+
+## Attribution & Lisensi
+
+Proyek ini **MIT License** — lihat [LICENSE](LICENSE).
+
+- [OpenCode](https://github.com/sst/opencode) — konsep agent engine & integrasi server mode (opsional). Open Chat AI adalah klien GUI independen, bukan wrapper CLI OpenCode.
+- [Ollama](https://github.com/ollama/ollama) — backend model lokal/remote via HTTP API.
+- Jetpack Compose, Material 3, OkHttp, Markwon, DataStore, kotlinx.serialization — lisensi masing-masing (Apache-2.0/MIT).

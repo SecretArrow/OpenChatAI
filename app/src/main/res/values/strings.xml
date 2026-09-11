@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Open Chat AI</string>
+    <string name="terminal_tab">Terminal</string>
+    <string name="notification_channel_runtime">Runtime aktif</string>
+    <string name="notification_runtime_title">Open Chat AI</string>
+    <string name="notification_runtime_text">Proses development sedang berjalan di latar belakang</string>
+</resources>

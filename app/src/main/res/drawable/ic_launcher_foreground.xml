@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- gelembung chat -->
+    <path
+        android:fillColor="#6C5CE7"
+        android:pathData="M24,30 C24,25.58 27.58,22 32,22 L76,22 C80.42,22 84,25.58 84,30 L84,64 C84,68.42 80.42,72 76,72 L48,72 L34,84 L34,72 L32,72 C27.58,72 24,68.42 24,64 Z" />
+
+    <!-- spark AI -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,32 L57.5,41.5 L67,45 L57.5,48.5 L54,58 L50.5,48.5 L41,45 L50.5,41.5 Z" />
+
+    <!-- titik chat -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,45 m-2.5,0 a2.5,2.5 0 1,1 5,0 a2.5,2.5 0 1,1 -5,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M70,45 m-2.5,0 a2.5,2.5 0 1,1 5,0 a2.5,2.5 0 1,1 -5,0" />
+</vector>
