@@ -6,8 +6,9 @@ import android.net.Network
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.openchai.app.AgentOrchestrator
+import com.openchai.app.OrchestrationEvent
 import com.openchai.app.OpenChatApp
-import com.openchai.core.ai.ModelInfo
+import com.openchai.core.model.ModelInfo
 import com.openchai.core.data.ConversationStore
 import com.openchai.core.model.ChatMessage
 import com.openchai.core.model.Conversation
@@ -262,19 +263,19 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 container.orchestrator.execute(lastUser.content, history).collect { event ->
                     when (event) {
-                        is AgentOrchestrator.OrchestrationEvent.StepsChanged -> {
+                        is OrchestrationEvent.StepsChanged -> {
                             steps.clear()
                             steps.addAll(event.steps)
                             publish()
                         }
-                        is AgentOrchestrator.OrchestrationEvent.PartialAnswer -> {
+                        is OrchestrationEvent.PartialAnswer -> {
                             assistantText = event.accumulated
                             publish()
                         }
-                        is AgentOrchestrator.OrchestrationEvent.Finished -> {
+                        is OrchestrationEvent.Finished -> {
                             assistantText = event.answer
                         }
-                        is AgentOrchestrator.OrchestrationEvent.Failed -> {
+                        is OrchestrationEvent.Failed -> {
                             throw GenerationException(event.message)
                         }
                     }

@@ -57,12 +57,14 @@ class ShellEnvironment(private val context: Context) {
     }
 
     /** Workspace root aktif dari container; null bila tidak tersedia/kosong. */
-    fun workspaceRoot(): String? = try {
-        val app = context.applicationContext as? OpenChatApp ?: return null
-        val root = app.container.workspaceManager.workspaceRoot()
-        root.takeIf { it.isNotBlank() && File(it).exists() }
-    } catch (_: Exception) {
-        null
+    fun workspaceRoot(): String? {
+        return try {
+            val app = context.applicationContext as? OpenChatApp ?: return null
+            val root = app.container.workspaceManager.workspaceRoot()
+            root.takeIf { it.isNotBlank() && File(it).exists() }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     companion object {

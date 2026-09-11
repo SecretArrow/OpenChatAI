@@ -32,7 +32,7 @@ import java.io.ByteArrayOutputStream
 private const val MAX_ATTACHMENT_BYTES = 50 * 1024
 
 /**
- * Input bar chat modern: attach file (text/*), field multi-line, dan tombol Send/Stop.
+ * Input bar chat modern: attach file (MIME teks), field multi-line, dan tombol Send/Stop.
  * Saat isGenerating tombol kanan berubah menjadi Close (Stop).
  */
 @Composable

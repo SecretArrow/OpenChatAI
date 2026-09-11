@@ -58,7 +58,8 @@ object AgentTools {
      * Pohon direktori 2 level, maksimal [MAX_LIST_ENTRIES] entri.
      * Format: "d name/" untuk direktori, "- name (N bytes)" untuk file.
      */
-    fun listFiles(root: String, relPath: String): String = try {
+    fun listFiles(root: String, relPath: String): String {
+        return try {
         val dir = resolve(root, relPath)
             ?: return "ERROR: Path is outside the workspace: $relPath"
         if (!dir.isDirectory) return "ERROR: Not a directory: $relPath"
@@ -99,9 +100,11 @@ object AgentTools {
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "list failed"}"
     }
+    }
 
     /** Baca file teks maksimal 16 KB; bila lebih besar, potong dan beri catatan. */
-    fun readFile(root: String, relPath: String): String = try {
+    fun readFile(root: String, relPath: String): String {
+        return try {
         val file = resolve(root, relPath)
             ?: return "ERROR: Path is outside the workspace: $relPath"
         if (!file.isFile) return "ERROR: Not a file: $relPath"
@@ -126,9 +129,11 @@ object AgentTools {
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "read failed"}"
     }
+    }
 
     /** Tulis file (parent dibuat otomatis). Kembalikan "OK (N bytes)". */
-    fun writeFile(root: String, relPath: String, content: String): String = try {
+    fun writeFile(root: String, relPath: String, content: String): String {
+        return try {
         if (relPath.isBlank()) return "ERROR: Empty path"
         val file = resolve(root, relPath)
             ?: return "ERROR: Path is outside the workspace: $relPath"
@@ -142,9 +147,11 @@ object AgentTools {
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "write failed"}"
     }
+    }
 
     /** Hapus file atau direktori (rekursif untuk direktori). */
-    fun deleteFile(root: String, relPath: String): String = try {
+    fun deleteFile(root: String, relPath: String): String {
+        return try {
         val file = resolve(root, relPath)
             ?: return "ERROR: Path is outside the workspace: $relPath"
         if (!file.exists()) return "ERROR: Not found: $relPath"
@@ -153,13 +160,15 @@ object AgentTools {
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "delete failed"}"
     }
+    }
 
     /**
      * Pencarian teks sederhana (case-insensitive) secara rekursif.
      * Maksimal [MAX_SEARCH_MATCHES] match "file:line: text",
      * skip direktori .git & node_modules, file > 512KB dilewati, maksimal 400 file.
      */
-    fun search(root: String, query: String): String = try {
+    fun search(root: String, query: String): String {
+        return try {
         if (query.isBlank()) return "ERROR: Empty search query"
         val rootDir = File(root).canonicalFile
         if (!rootDir.isDirectory) return "ERROR: Workspace root not found: $root"
@@ -204,5 +213,6 @@ object AgentTools {
         }
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "search failed"}"
+    }
     }
 }

@@ -74,7 +74,7 @@ fun ModelSelectorSheet(
             LazyColumn(modifier = Modifier.fillMaxWidth().height(420.dp)) {
                 items(PROVIDER_ORDER, key = { it.id.name }) { row ->
                     val status = providerStatus[row.id]
-                    val providerModels = models[row.id] ?: emptyList()
+                    val providerModels = models[row.id] ?: emptyList<ModelInfo>()
                     val dotColor = when (status?.connected) {
                         true -> Color(0xFF3FB950)
                         false -> MaterialTheme.colorScheme.error
@@ -89,7 +89,7 @@ fun ModelSelectorSheet(
                             }
                             .padding(vertical = 10.dp)
                     ) {
-                        Row(vertical = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             StatusDot(dotColor)
                             Spacer(Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
