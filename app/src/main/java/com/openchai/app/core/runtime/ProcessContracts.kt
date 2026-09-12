@@ -36,5 +36,13 @@ interface ProcessSupervisor {
     /** Counter revisi output; naik setiap ada output baru (untuk trigger refresh UI). */
     fun outputRevision(id: String): StateFlow<Long>
 
+    /**
+     * Tulis satu baris ke stdin proses (newline ditambahkan otomatis).
+     * Memungkinkan background process bersifat interaktif, mis. `python3 -i`
+     * sebagai REPL atau `node` yang membaca perintah dari stdin.
+     * Diabaikan bila proses tidak ditemukan atau sudah berhenti.
+     */
+    fun writeStdin(id: String, line: String) {}
+
     fun pruneFinished()
 }

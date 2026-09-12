@@ -54,6 +54,7 @@ class AndroidProcessManager(private val context: Context) : ProcessSupervisor, C
     // sehingga command/cwd/autoRestart disimpan terpisah untuk keperluan restart.
     private val specs = ConcurrentHashMap<String, ProcessSpec>()
     private val handles = ConcurrentHashMap<String, Process>()
+    private val stdins = ConcurrentHashMap<String, java.io.OutputStream>()
     private val runtimeJobs = ConcurrentHashMap<String, Job>()
     private val outputBuffers = ConcurrentHashMap<String, StringBuilder>()
     private val outputRevisions = ConcurrentHashMap<String, MutableStateFlow<Long>>()
@@ -99,6 +100,7 @@ class AndroidProcessManager(private val context: Context) : ProcessSupervisor, C
 
     override fun stop(id: String) {
         userStopFlags[id] = true
+        stdins.remove(id)
         val process = handles[id] ?: return
         try {
             process.destroy()
@@ -145,6 +147,7 @@ class AndroidProcessManager(private val context: Context) : ProcessSupervisor, C
         if (removed.isEmpty()) return
         for (id in removed) {
             handles.remove(id)
+            stdins.remove(id)
             specs.remove(id)
             runtimeJobs.remove(id)
             outputBuffers.remove(id)
@@ -175,6 +178,7 @@ class AndroidProcessManager(private val context: Context) : ProcessSupervisor, C
                     return@launch
                 }
                 handles[id] = process
+                process.outputStream?.let { stdins[id] = it }
                 val startedAt = System.currentTimeMillis()
                 val pid = extractPid(process)
                 userStopFlags[id] = false
@@ -205,6 +209,7 @@ class AndroidProcessManager(private val context: Context) : ProcessSupervisor, C
                 runCatching { process.errorStream.close() }
                 runCatching { process.outputStream.close() }
                 handles.remove(id)
+                stdins.remove(id)
 
                 if (System.currentTimeMillis() - startedAt > STABLE_RUNTIME_MS) {
                     consecutiveRestarts[id] = 0
@@ -246,6 +251,7 @@ class AndroidProcessManager(private val context: Context) : ProcessSupervisor, C
 
     private fun markFailed(id: String, message: String?) {
         handles.remove(id)
+        stdins.remove(id)
         val endedAt = System.currentTimeMillis()
         updateEntry(id) {
             it.copy(state = ProcState.FAILED, endedAt = endedAt, exitCode = -1)
@@ -418,6 +424,22 @@ class AndroidProcessManager(private val context: Context) : ProcessSupervisor, C
             }
             CommandResult(exitCode, stdout.toString(), stderr.toString())
         }
+
+    /** Tulis baris ke stdin proses latar belakang (REPL / proses interaktif). */
+    override fun writeStdin(id: String, line: String) {
+        val stream = stdins[id] ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val text = if (line.endsWith("\n")) line else line + "\n"
+                synchronized(stream) {
+                    stream.write(text.toByteArray(Charsets.UTF_8))
+                    stream.flush()
+                }
+            } catch (_: Exception) {
+                // Proses sudah mati / stream ditutup — abaikan.
+            }
+        }
+    }
 
     private fun drainStream(stream: InputStream, sink: StringBuilder) {
         try {

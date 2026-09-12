@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -64,6 +65,11 @@ import com.openchai.core.runtime.ProcState
 import com.openchai.terminal.Ansi
 
 private enum class PanelTab { SHELL, PROCESSES }
+
+/** Command cepat yang sering dipakai di tab shell. */
+private val QUICK_COMMANDS = listOf(
+    "ls", "pwd", "git status", "node -v", "python3 --version", "df -h .", "ps | head"
+)
 
 /**
  * Panel terminal bawah (300dp): sesi shell interaktif + daftar proses
@@ -216,6 +222,29 @@ fun TerminalPanel(
                         }
                     } else {
                         val output by vm.outputFlow(sessionId).collectAsStateWithLifecycle()
+                        // Baris command cepat (ketik satu per satu ke sesi shell aktif).
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 10.dp, vertical = 2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            QUICK_COMMANDS.forEach { cmd ->
+                                AssistChip(
+                                    onClick = {
+                                        if (selectedSessionId != null) vm.write(selectedSessionId, cmd)
+                                    },
+                                    label = {
+                                        Text(
+                                            text = cmd,
+                                            fontFamily = FontFamily.Monospace,
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                )
+                            }
+                        }
                         TerminalOutputSurface(
                             text = Ansi.strip(output),
                             fontSize = settings.terminalFontSize,
@@ -320,6 +349,55 @@ fun TerminalPanel(
                                     .fillMaxWidth()
                                     .weight(1f)
                             )
+                            // Input stdin untuk proses interaktif (REPL python3 -i, node, dsb.).
+                            val proc = processes.firstOrNull { it.id == showingId }
+                            val procActive = proc != null && (
+                                proc.state == ProcState.RUNNING ||
+                                    proc.state == ProcState.STARTING ||
+                                    proc.state == ProcState.RESTARTING
+                                )
+                            if (procActive) {
+                                var stdinText by remember(showingId) { mutableStateOf("") }
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = stdinText,
+                                        onValueChange = { stdinText = it },
+                                        modifier = Modifier.weight(1f),
+                                        singleLine = true,
+                                        placeholder = {
+                                            Text("stdin (REPL)…", fontFamily = FontFamily.Monospace)
+                                        },
+                                        textStyle = TextStyle(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = settings.terminalFontSize.sp
+                                        ),
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                        keyboardActions = KeyboardActions(
+                                            onSend = {
+                                                if (stdinText.isNotBlank()) {
+                                                    vm.writeProcessStdin(showingId, stdinText)
+                                                    stdinText = ""
+                                                }
+                                            }
+                                        )
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            if (stdinText.isNotBlank()) {
+                                                vm.writeProcessStdin(showingId, stdinText)
+                                                stdinText = ""
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Filled.Send, contentDescription = "Kirim ke stdin")
+                                    }
+                                }
+                            }
                         }
                     }
                 }

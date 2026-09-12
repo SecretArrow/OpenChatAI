@@ -143,6 +143,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _conversations.value = store.conversations()
     }
 
+    /** Muat ulang daftar riwayat (dipakai layar History saat dibuka). */
+    fun refreshHistory() {
+        viewModelScope.launch { refreshConversations() }
+    }
+
     fun refreshProjects() {
         viewModelScope.launch {
             _projects.value = container.workspaceManager.listProjects()

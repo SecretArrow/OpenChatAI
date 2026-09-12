@@ -1,5 +1,6 @@
 package com.openchai.app.ui.chat
 
+import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -39,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,6 +50,15 @@ import com.openchai.app.ui.components.StatusDot
 import com.openchai.app.ui.theme.TerminalYellow
 import com.openchai.core.model.Role
 import com.openchai.app.ui.terminal.TerminalPanel
+
+/** Slash command cepat: chip di atas input bar, mengisi prompt yang lebih lengkap. */
+private val SLASH_COMMANDS = listOf(
+    "/fix" to "Find the error in this project, fix it, and verify the result.",
+    "/test" to "Run the project tests, summarize the failures, and propose fixes.",
+    "/commit" to "Create a clean git commit for the current changes with a good message.",
+    "/explain" to "Explain the structure of this project in short bullets.",
+    "/review" to "Review the recent changes in this project and suggest improvements."
+)
 
 /**
  * Pusat pengalaman aplikasi: chat AI coding agent.
@@ -83,6 +95,44 @@ fun ChatScreen(
 
     val lastMessage = messages.lastOrNull()
     val lastAssistantId = messages.lastOrNull { it.role == Role.ASSISTANT }?.id
+    val context = LocalContext.current
+
+    fun exportConversationMarkdown() {
+        if (messages.isEmpty()) return
+        val md = buildString {
+            appendLine("# Open Chat AI — conversation export")
+            appendLine()
+            val now = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault())
+                .format(java.util.Date())
+            appendLine(
+                "_Project: ${activeProject?.name?.takeIf { it.isNotBlank() } ?: "-"} · " +
+                    "Model: ${settings.selectedModel.ifBlank { "auto" }} · $now_"
+            )
+            appendLine()
+            messages.forEach { m ->
+                when {
+                    m.isAgentActivity -> m.steps.forEach { s -> appendLine("- ${s.label}") }
+                    m.role == Role.USER -> {
+                        appendLine("**You:**")
+                        appendLine()
+                        appendLine(m.content)
+                    }
+                    else -> {
+                        appendLine("**Assistant:**")
+                        appendLine()
+                        appendLine(m.content)
+                    }
+                }
+                appendLine()
+            }
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Open Chat AI — conversation export")
+            putExtra(Intent.EXTRA_TEXT, md)
+        }
+        context.startActivity(Intent.createChooser(send, "Export conversation"))
+    }
 
     // Typing indicator hanya saat sedang generate dan belum ada delta jawaban terlihat
     // (pesan terakhir masih milik user, kartu aktivitas agent, atau konten masih kosong).
@@ -119,6 +169,9 @@ fun ChatScreen(
                 style = MaterialTheme.typography.titleLarge,
                 modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = { exportConversationMarkdown() }) {
+                Icon(Icons.Filled.Share, contentDescription = "Export chat as Markdown")
+            }
             IconButton(onClick = onOpenSettings) {
                 Icon(Icons.Filled.Settings, contentDescription = "Settings")
             }
@@ -211,6 +264,27 @@ fun ChatScreen(
                         TypingIndicator()
                     }
                 }
+            }
+        }
+
+        // ---------------- Slash command chips ----------------
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            SLASH_COMMANDS.forEach { (cmd, prompt) ->
+                AssistChip(
+                    onClick = { inputText = prompt },
+                    label = {
+                        Text(
+                            text = cmd,
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                )
             }
         }
 

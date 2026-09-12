@@ -3,6 +3,7 @@ package com.openchai.app.ui.navigation
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
@@ -22,11 +23,13 @@ import androidx.navigation.compose.rememberNavController
 import com.openchai.app.AppContainer
 import com.openchai.app.ui.chat.ChatScreen
 import com.openchai.app.ui.chat.ChatViewModel
+import com.openchai.app.ui.history.HistoryScreen
 import com.openchai.app.ui.projects.ProjectsScreen
 import com.openchai.app.ui.settings.SettingsScreen
 
 object Routes {
     const val CHAT = "chat"
+    const val HISTORY = "history"
     const val PROJECTS = "projects"
     const val SETTINGS = "settings"
 }
@@ -37,6 +40,10 @@ fun AppNavGraph(container: AppContainer) {
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
+    // ViewModel chat dibuat di level activity agar state dibagi antar tab
+    // (History membuka percakapan ke tab Chat yang sama).
+    val chatViewModel: ChatViewModel = viewModel()
+
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -45,6 +52,12 @@ fun AppNavGraph(container: AppContainer) {
                     onClick = { navigateTo(navController, Routes.CHAT) },
                     icon = { Icon(Icons.Filled.Home, contentDescription = "Chat") },
                     label = { Text("Chat") }
+                )
+                NavigationBarItem(
+                    selected = currentRoute == Routes.HISTORY,
+                    onClick = { navigateTo(navController, Routes.HISTORY) },
+                    icon = { Icon(Icons.Filled.DateRange, contentDescription = "History") },
+                    label = { Text("History") }
                 )
                 NavigationBarItem(
                     selected = currentRoute == Routes.PROJECTS,
@@ -67,7 +80,6 @@ fun AppNavGraph(container: AppContainer) {
             modifier = Modifier.padding(padding)
         ) {
             composable(Routes.CHAT) {
-                val chatViewModel: ChatViewModel = viewModel()
                 ChatScreen(
                     chatViewModel = chatViewModel,
                     onOpenProjects = {
@@ -75,6 +87,14 @@ fun AppNavGraph(container: AppContainer) {
                     },
                     onOpenSettings = {
                         navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
+                    }
+                )
+            }
+            composable(Routes.HISTORY) {
+                HistoryScreen(
+                    chatViewModel = chatViewModel,
+                    onOpenConversation = {
+                        navigateTo(navController, Routes.CHAT)
                     }
                 )
             }

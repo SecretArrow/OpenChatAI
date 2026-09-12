@@ -12,6 +12,9 @@
 - Streaming AI response, Markdown, code blocks + syntax layout, copy response/code
 - Regenerate, Retry, Stop generation, Edit message, lanjut percakapan
 - Riwayat percakapan lokal (Today/Yesterday), percakapan per-project
+- **Layar History**: pencarian, pengelompokan Today / Yesterday / Previous 7 days / Older, buka & hapus percakapan
+- **Slash commands**: `/fix`, `/test`, `/commit`, `/explain`, `/review` — satu ketukan mengisi prompt lengkap
+- **Export chat**: bagikan percakapan sebagai Markdown lewat share sheet Android
 - Auto-scroll pintar, typing indicator, status jaringan & model
 
 ### AI Provider
@@ -28,8 +31,10 @@
 ### Terminal (hidden by default)
 - Embedded Linux terminal (sh/mksh) — toggle `Terminal ▼` di bawah chat
 - Multi-session, command history, copy/paste, selection, clear, ANSI strip, monospace + font size
+- **Quick commands**: chip `ls`, `git status`, `node -v`, `python3 --version`, dll.
 - Environment `PATH` benar + tambahan PATH kustom (mis. runtime Termux untuk `node`/`python3` bila tersedia di perangkat)
 - **Background Process Manager**: proses `npm run dev`, `node server.js`, dll. tetap hidup saat kembali ke Chat — PID, port terdeteksi, durasi, output berbatas, stop/restart, auto-restart opsional, foreground service
+- **stdin untuk background process**: jalankan `python3 -i` / `node` sebagai background process lalu kirim perintah lewat input REPL (Proses → output → stdin)
 
 ### Keamanan
 - Workspace sandbox: operasi file agent dibatasi direktori project

@@ -44,6 +44,9 @@ class TerminalViewModel(app: Application) : AndroidViewModel(app) {
 
     fun restartProcess(id: String) = processSupervisor.restart(id)
 
+    /** Tulis baris ke stdin background process (mis. REPL `python3 -i`). */
+    fun writeProcessStdin(id: String, line: String) = processSupervisor.writeStdin(id, line)
+
     /** Buang entri proses non-aktif yang lebih tua dari 30 menit. */
     fun refreshProcesses() = processSupervisor.pruneFinished()
 
