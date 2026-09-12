@@ -57,7 +57,7 @@ fun AppNavGraph(container: AppContainer) {
 
     // Drawer "Chats" (daftar sesi paralel) + scope untuk buka/tutup drawer.
     val scope = rememberCoroutineScope()
-    val drawerState = rememberDrawerState(DrawerValue.Hidden)
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
 
     // Deep-link dari notifikasi background generation: pindah ke sesi yang
     // dinotifikasi, lalu kosongkan agar tidak terpicu ulang saat recompose.
