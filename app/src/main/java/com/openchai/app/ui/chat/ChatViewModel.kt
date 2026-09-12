@@ -8,6 +8,9 @@ import androidx.lifecycle.viewModelScope
 import com.openchai.app.OpenChatApp
 import com.openchai.app.background.GenerationManagerProvider
 import com.openchai.app.background.SessionGenState
+import com.openchai.core.agent.PermissionDecision
+import com.openchai.core.agent.PermissionMode
+import com.openchai.core.agent.PermissionRequest
 import com.openchai.core.data.ConversationStore
 import com.openchai.core.model.ChatMessage
 import com.openchai.core.model.Conversation
@@ -16,6 +19,7 @@ import com.openchai.core.model.Project
 import com.openchai.core.model.ProviderId
 import com.openchai.core.model.Role
 import com.openchai.core.settings.AppSettings
+import com.openchai.core.settings.EngineMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -92,6 +96,28 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val settings: StateFlow<AppSettings> = settingsRepo.settings
     val activeProject: StateFlow<Project?> = container.activeProject
 
+    // ------------------------------------------------------------------
+    // Permission modes (gaya Claude Code) & plan approval
+    // ------------------------------------------------------------------
+
+    /** Request izin yang menunggu jawaban user (UI menampilkan PermissionDialog). */
+    val pendingPermission: StateFlow<PermissionRequest?> = container.permissionBroker.pending
+
+    /**
+     * Mode izin saat run terakhir dimulai (disimpan di [send] SEBELUM generasi).
+     * Null = tidak ada run berjalan yang relevan untuk plan approval.
+     */
+    private val lastRunMode = MutableStateFlow<PermissionMode?>(null)
+
+    private val _planApproval = MutableStateFlow(false)
+
+    /**
+     * True bila run terakhir dijalankan dalam PLAN mode, mode masih PLAN,
+     * dan sesi aktif sudah selesai generating — saat itu kartu "Plan ready"
+     * ditampilkan untuk disetujui user.
+     */
+    val planApproval: StateFlow<Boolean> = _planApproval.asStateFlow()
+
     /** State generasi semua sesi (Running/Done/Failed/Cancelled) dari manager. */
     val genStates: StateFlow<Map<String, SessionGenState>> = generationManager.states
 
@@ -115,8 +141,20 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         observeGenerationStates()
+        observePlanApproval()
         registerNetworkCallback()
         refreshEngineStatus()
+    }
+
+    /** Derived plan approval (pola sama dengan isGenerating): combine 3 state. */
+    private fun observePlanApproval() {
+        viewModelScope.launch {
+            combine(lastRunMode, settingsRepo.settings, _isGenerating) { last, s, generating ->
+                last == PermissionMode.PLAN &&
+                    s.permissionMode == PermissionMode.PLAN &&
+                    !generating
+            }.collect { _planApproval.value = it }
+        }
     }
 
     /**
@@ -218,6 +256,25 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         container.activeProject.value = project
     }
 
+    /**
+     * Buat workspace app-private "workspace", jadikan proyek aktif, persist
+     * activeWorkspaceId, lalu echo konfirmasi ke chat (dipakai tombol
+     * "Use app-private workspace" di workspace gate).
+     */
+    fun createNewAppWorkspace() {
+        viewModelScope.launch {
+            val project = container.workspaceManager.createProject("workspace")
+            container.activeProject.value = project
+            settingsRepo.update { it.copy(activeWorkspaceId = project.id) }
+            refreshProjects()
+            appendLocalAssistant(
+                ensureConversation(),
+                "Workspace \"${project.name}\" created (app-private storage). " +
+                    "The agent can now read and edit files inside it."
+            )
+        }
+    }
+
     // ------------------------------------------------------------------
     // Send / generate (delegasi ke GenerationManager)
     // ------------------------------------------------------------------
@@ -229,16 +286,203 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val convId = ensureConversation()
             // Guard per-sesi: sesi lain tetap bisa mengirim saat sesi ini generating.
             if (generationManager.isGenerating(convId)) return@launch
+
+            // Slash commands dijawab lokal sebagai assistant echo — tanpa generasi.
+            if (handleSlashCommand(convId, text)) return@launch
+
+            // Gating workspace: engine AGENT butuh folder proyek aktif.
+            if (settingsRepo.settings.value.engineMode == EngineMode.AGENT &&
+                container.activeProject.value == null
+            ) {
+                store.appendMessage(
+                    convId,
+                    ChatMessage(conversationId = convId, role = Role.USER, content = text)
+                )
+                appendLocalAssistant(
+                    convId,
+                    "Create a workspace first — pick a project folder.",
+                    isError = true
+                )
+                return@launch
+            }
+
             store.appendMessage(convId, ChatMessage(conversationId = convId, role = Role.USER, content = text))
             _messages.value = store.messages(convId)
             refreshConversations()
+            // Simpan mode izin run ini (dasar keputusan plan approval nanti).
+            lastRunMode.value = settingsRepo.settings.value.permissionMode
             generationManager.start(convId)
         }
+    }
+
+    /**
+     * Slash commands lokal (TIDAK dikirim ke model). Bila [text] dikenali,
+     * jawab sebagai assistant message lokal dan return true.
+     *
+     *  - /ask · /mode ask  → PermissionMode.ASK
+     *  - /plan · /mode plan → PermissionMode.PLAN
+     *  - /mode edit        → PermissionMode.AUTO_READ_EDIT
+     *  - /yolo · /mode yolo → PermissionMode.FULL_ACCESS
+     *  - /init             → tulis template AGENTS.md di proyek aktif
+     *  - /mode             → bantuan pemakaian
+     *  Unknown slash lain lolos sebagai pesan biasa ke model.
+     */
+    private suspend fun handleSlashCommand(convId: String, text: String): Boolean = when {
+        text == "/ask" || text == "/mode ask" -> {
+            setPermissionMode(PermissionMode.ASK)
+            appendLocalAssistant(convId, modeEcho(PermissionMode.ASK))
+            true
+        }
+        text == "/plan" || text == "/mode plan" -> {
+            setPermissionMode(PermissionMode.PLAN)
+            appendLocalAssistant(convId, modeEcho(PermissionMode.PLAN))
+            true
+        }
+        text == "/mode edit" -> {
+            setPermissionMode(PermissionMode.AUTO_READ_EDIT)
+            appendLocalAssistant(convId, modeEcho(PermissionMode.AUTO_READ_EDIT))
+            true
+        }
+        text == "/yolo" || text == "/mode yolo" -> {
+            setPermissionMode(PermissionMode.FULL_ACCESS)
+            appendLocalAssistant(convId, modeEcho(PermissionMode.FULL_ACCESS))
+            true
+        }
+        text == "/mode" -> {
+            appendLocalAssistant(
+                convId,
+                "Usage: /mode ask|plan|edit|yolo — current mode: " +
+                    settingsRepo.settings.value.permissionMode.friendlyName()
+            )
+            true
+        }
+        text == "/init" -> {
+            runInitCommand(convId)
+            true
+        }
+        else -> false
+    }
+
+    private fun modeEcho(mode: PermissionMode): String = when (mode) {
+        PermissionMode.ASK ->
+            "Permission mode: Ask — every write, delete and command asks for confirmation."
+        PermissionMode.PLAN ->
+            "Permission mode: Plan — read-only research; write tools are denied " +
+                "until you approve the plan."
+        PermissionMode.AUTO_READ_EDIT ->
+            "Permission mode: Edit — reads and file edits run automatically; " +
+                "deletes and commands still ask."
+        PermissionMode.FULL_ACCESS ->
+            "Permission mode: YOLO — everything auto-approved. " +
+                "Use only inside a trusted workspace."
+    }
+
+    /** Label manusiawi mode izin (dipakai echo slash command). */
+    private fun PermissionMode.friendlyName(): String = when (this) {
+        PermissionMode.ASK -> "Ask"
+        PermissionMode.PLAN -> "Plan"
+        PermissionMode.AUTO_READ_EDIT -> "Edit"
+        PermissionMode.FULL_ACCESS -> "YOLO"
+    }
+
+    /**
+     * /init: tulis template AGENTS.md ke root proyek aktif (overwrite bila
+     * sudah ada — konfirmasi disebut di echo). Tanpa proyek aktif → echo error.
+     */
+    private suspend fun runInitCommand(convId: String) {
+        val project = container.activeProject.value
+        if (project == null) {
+            appendLocalAssistant(
+                convId,
+                "No active workspace — /init writes AGENTS.md into the active project. " +
+                    "Create or pick a project folder first.",
+                isError = true
+            )
+            return
+        }
+        val fs = container.workspaceManager.fsFor(project)
+        val template = buildString {
+            appendLine("# ${project.name.ifBlank { "Project" }}")
+            appendLine()
+            appendLine("## Overview")
+            appendLine("Describe what this project does, its goals, and its main components.")
+            appendLine()
+            appendLine("## Build & Test")
+            appendLine("- Build: <main build command>")
+            appendLine("- Test: <test command>")
+            appendLine()
+            appendLine("## Conventions (edit me)")
+            appendLine("- Code style, folder layout, naming rules, and what the agent should never touch.")
+        }
+        val existed = fs.exists("AGENTS.md")
+        val result = fs.writeFile("AGENTS.md", template)
+        when {
+            result.startsWith("ERROR") ->
+                appendLocalAssistant(convId, "Failed to write AGENTS.md — $result", isError = true)
+            existed ->
+                appendLocalAssistant(
+                    convId,
+                    "AGENTS.md overwritten in ${project.name} (previous content replaced)."
+                )
+            else ->
+                appendLocalAssistant(convId, "AGENTS.md created in ${project.name}.")
+        }
+    }
+
+    /**
+     * Tambahkan assistant message LOKAL (echo slash command / pesan error
+     * gating) ke store dan refresh UI — tanpa memicu generasi.
+     */
+    private suspend fun appendLocalAssistant(
+        convId: String,
+        content: String,
+        isError: Boolean = false
+    ) {
+        store.appendMessage(
+            convId,
+            ChatMessage(conversationId = convId, role = Role.ASSISTANT, content = content, isError = isError)
+        )
+        _messages.value = store.messages(convId)
+        refreshConversations()
     }
 
     /** Stop hanya membatalkan generasi sesi yang sedang AKTIF di layar. */
     fun stopGeneration() {
         activeConversationId.value?.let { generationManager.cancel(it) }
+    }
+
+    // ------------------------------------------------------------------
+    // Permission broker & plan approval (mode izin gaya Claude Code)
+    // ------------------------------------------------------------------
+
+    /** Jawab request izin yang pending (dipanggil PermissionDialog). */
+    fun respondPermission(reqId: String, decision: PermissionDecision) =
+        container.permissionBroker.respond(reqId, decision)
+
+    /** Ganti mode izin agent (persist di AppSettings.permissionMode). */
+    fun setPermissionMode(mode: PermissionMode) {
+        viewModelScope.launch {
+            settingsRepo.update { it.copy(permissionMode = mode) }
+        }
+    }
+
+    /**
+     * Setujui rencana hasil PLAN mode: mode naik ke AUTO_READ_EDIT (edit
+     * auto-approved), tandai run berikutnya, lalu run ulang sesi aktif —
+     * runGeneration memakai USER message terakhir (perilaku manager).
+     */
+    fun approvePlan() {
+        viewModelScope.launch {
+            settingsRepo.update { it.copy(permissionMode = PermissionMode.AUTO_READ_EDIT) }
+            lastRunMode.value = PermissionMode.AUTO_READ_EDIT
+            val convId = _activeConversationId.value ?: return@launch
+            if (!generationManager.isGenerating(convId)) generationManager.start(convId)
+        }
+    }
+
+    /** Tutup kartu plan approval tanpa mengeksekusi (mode tetap PLAN). */
+    fun dismissPlanApproval() {
+        lastRunMode.value = null
     }
 
     /** Hapus balasan terakhir lalu generate ulang dari pesan user terakhir. */

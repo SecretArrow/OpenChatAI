@@ -42,7 +42,10 @@ data class Conversation(
 data class Project(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "",
+    /** Path absolut — hanya untuk workspace app-dir (treeUri == null). */
     val path: String = "",
+    /** Non-null = workspace SAF dari folder pilihan user (OpenDocumentTree). */
+    val treeUri: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val lastOpenedAt: Long = System.currentTimeMillis()
 )

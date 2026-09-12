@@ -47,6 +47,8 @@ private val KEY_OPENCODE_SERVER_URL = stringPreferencesKey("opencode_server_url"
 private val KEY_PREFER_OPENCODE = booleanPreferencesKey("prefer_opencode_engine")
 private val KEY_MAX_AGENT_ITERATIONS = intPreferencesKey("max_agent_iterations")
 private val KEY_AUTO_APPROVE_COMMANDS = booleanPreferencesKey("auto_approve_commands")
+private val KEY_PERMISSION_MODE = stringPreferencesKey("permission_mode")
+private val KEY_ACTIVE_WORKSPACE_ID = stringPreferencesKey("active_workspace_id")
 private val KEY_TERMINAL_FONT_SIZE = intPreferencesKey("terminal_font_size")
 private val KEY_TERMINAL_AUTO_SCROLL = booleanPreferencesKey("terminal_auto_scroll")
 private val KEY_CHAT_FONT_SCALE = floatPreferencesKey("chat_font_scale")
@@ -97,6 +99,8 @@ class DataStoreSettingsRepository(
             prefs[KEY_PREFER_OPENCODE] = next.preferOpenCodeEngine
             prefs[KEY_MAX_AGENT_ITERATIONS] = next.maxAgentIterations
             prefs[KEY_AUTO_APPROVE_COMMANDS] = next.autoApproveCommands
+            prefs[KEY_PERMISSION_MODE] = next.permissionMode.name
+            prefs[KEY_ACTIVE_WORKSPACE_ID] = next.activeWorkspaceId
             prefs[KEY_TERMINAL_FONT_SIZE] = next.terminalFontSize
             prefs[KEY_TERMINAL_AUTO_SCROLL] = next.terminalAutoScroll
             prefs[KEY_CHAT_FONT_SCALE] = next.chatFontScale
@@ -141,6 +145,8 @@ class DataStoreSettingsRepository(
         preferOpenCodeEngine = this[KEY_PREFER_OPENCODE] ?: DEFAULTS.preferOpenCodeEngine,
         maxAgentIterations = this[KEY_MAX_AGENT_ITERATIONS] ?: DEFAULTS.maxAgentIterations,
         autoApproveCommands = this[KEY_AUTO_APPROVE_COMMANDS] ?: DEFAULTS.autoApproveCommands,
+        permissionMode = enumOrDefault(this[KEY_PERMISSION_MODE], DEFAULTS.permissionMode),
+        activeWorkspaceId = this[KEY_ACTIVE_WORKSPACE_ID] ?: DEFAULTS.activeWorkspaceId,
         terminalFontSize = this[KEY_TERMINAL_FONT_SIZE] ?: DEFAULTS.terminalFontSize,
         terminalAutoScroll = this[KEY_TERMINAL_AUTO_SCROLL] ?: DEFAULTS.terminalAutoScroll,
         themeMode = enumOrDefault(this[KEY_THEME_MODE], ThemeMode.SYSTEM),

@@ -49,7 +49,12 @@ class AgentOrchestrator(
         }
     }
 
-    fun execute(task: String, history: List<Pair<String, String>>): Flow<OrchestrationEvent> =
+    fun execute(
+        task: String,
+        history: List<Pair<String, String>>,
+        workspaceFs: com.openchai.core.data.WorkspaceFs? = null,
+        permission: com.openchai.core.agent.PermissionContext? = null
+    ): Flow<OrchestrationEvent> =
         channelFlow {
             val s = settings.settings.value
 
@@ -102,7 +107,9 @@ class AgentOrchestrator(
             val request = AgentRequest(
                 task = task,
                 history = history,
-                workspacePath = activeProject.value?.path
+                workspacePath = activeProject.value?.path,
+                workspaceFs = workspaceFs,
+                permission = permission
             )
 
             val acc = StringBuilder()

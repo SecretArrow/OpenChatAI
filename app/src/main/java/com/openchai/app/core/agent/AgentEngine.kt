@@ -15,7 +15,25 @@ data class AgentRequest(
     val task: String,
     /** Riwayat (role, content) untuk konteks lanjutan percakapan. */
     val history: List<Pair<String, String>> = emptyList(),
-    val workspacePath: String? = null
+    val workspacePath: String? = null,
+    /**
+     * Filesystem workspace untuk tool agent. Bila non-null, engine WAJIB memakai
+     * ini (bukan akses File langsung) — mendukung workspace SAF (folder pilihan
+     * user) maupun app-dir. Null = fallback legacy ke [workspacePath].
+     */
+    val workspaceFs: com.openchai.core.data.WorkspaceFs? = null,
+    /**
+     * Konteks izin gaya Claude Code / OpenCode (mode + broker + sessionId).
+     * Null = perilaku legacy (auto-approve read, run_command via autoApproveCommands).
+     */
+    val permission: PermissionContext? = null
+)
+
+/** Mode izin + broker untuk satu run generasi agent. */
+data class PermissionContext(
+    val mode: PermissionMode,
+    val broker: PermissionBroker,
+    val sessionId: String
 )
 
 /**

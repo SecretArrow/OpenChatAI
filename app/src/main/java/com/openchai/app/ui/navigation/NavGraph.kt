@@ -35,6 +35,8 @@ import com.openchai.app.ui.models.ModelsScreen
 import com.openchai.app.ui.projects.ProjectsScreen
 import com.openchai.app.ui.sessions.SessionsDrawer
 import com.openchai.app.ui.settings.SettingsScreen
+import com.openchai.app.ui.workspace.WorkspaceSetupScreen
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 object Routes {
@@ -43,6 +45,9 @@ object Routes {
     const val PROJECTS = "projects"
     const val SETTINGS = "settings"
     const val MODELS = "models"
+
+    /** Layar setup workspace (wajib sebelum chat Agent mode). */
+    const val WORKSPACE_SETUP = "workspace_setup"
 }
 
 @Composable
@@ -67,6 +72,21 @@ fun AppNavGraph(container: AppContainer) {
                 chatViewModel.selectConversation(sid)
                 navigateTo(navController, Routes.CHAT)
                 SessionDeepLink.pendingSessionId.value = null
+            }
+        }
+    }
+
+    // Gating first-run: chat Agent mode WAJIB workspace aktif. Beri jeda singkat
+    // agar restore workspace di AppContainer (DataStore async) sempat jalan;
+    // bila tetap kosong → arahkan ke layar setup workspace.
+    LaunchedEffect(Unit) {
+        delay(400)
+        if (container.activeProject.value == null) {
+            navController.navigate(Routes.WORKSPACE_SETUP) {
+                // Start destination (Chat) tetap di back stack — back dari setup
+                // kembali ke Chat yang menampilkan ajakan membuka setup lagi.
+                popUpTo(navController.graph.findStartDestination().id) { inclusive = false }
+                launchSingleTop = true
             }
         }
     }
@@ -132,6 +152,11 @@ fun AppNavGraph(container: AppContainer) {
                         },
                         onOpenSettings = {
                             navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
+                        },
+                        // Kontrak subagent 6-a: param bernama onOpenWorkspaceSetup
+                        // dengan default {} — dipakai banner/CTA "workspace belum siap".
+                        onOpenWorkspaceSetup = {
+                            navController.navigate(Routes.WORKSPACE_SETUP) { launchSingleTop = true }
                         }
                     )
                 }
@@ -146,6 +171,18 @@ fun AppNavGraph(container: AppContainer) {
                 composable(Routes.PROJECTS) {
                     ProjectsScreen(
                         onProjectSelected = {
+                            navigateTo(navController, Routes.CHAT)
+                        },
+                        onNewWorkspace = {
+                            navController.navigate(Routes.WORKSPACE_SETUP) { launchSingleTop = true }
+                        }
+                    )
+                }
+                composable(Routes.WORKSPACE_SETUP) {
+                    WorkspaceSetupScreen(
+                        onWorkspaceReady = {
+                            // Workspace aktif sudah di-set VM → balik ke Chat
+                            // (dedup ke start destination, tanpa menumpuk stack).
                             navigateTo(navController, Routes.CHAT)
                         }
                     )

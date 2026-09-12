@@ -5,6 +5,7 @@ import com.openchai.agent.BuiltInAgent
 import com.openchai.agent.opencode.OpenCodeRuntime
 import com.openchai.app.ai.ProviderRegistry
 import com.openchai.app.ai.LocalLlamaProvider
+import com.openchai.app.permissions.DefaultPermissionBroker
 import com.openchai.app.ai.OllamaProvider
 import com.openchai.app.ai.OpenAiCompatProvider
 import com.openchai.app.ai.AnthropicProvider
@@ -34,6 +35,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Graph dependency aplikasi. Semua modul modular & dapat diganti independently. */
 class AppContainer(context: Context) {
@@ -58,6 +60,9 @@ class AppContainer(context: Context) {
     val modelManager: ModelManager = ModelManager(context, appScope)
     val llamaEngine: LlamaEngine = LlamaEngine.getInstance(context)
 
+    // Permission broker (mode izin ASK/PLAN/AUTO_READ_EDIT/FULL_ACCESS gaya CLI)
+    val permissionBroker: com.openchai.core.agent.PermissionBroker = DefaultPermissionBroker()
+
     // AI providers
     val providerRegistry = ProviderRegistry(
         ollama = OllamaProvider(settingsRepository),
@@ -79,6 +84,22 @@ class AppContainer(context: Context) {
                 runCatching {
                     llamaEngine.ensureLoaded(s.localModelPath, s.localContextSize, s.localThreads)
                 }
+            }
+        }
+
+        // Pulihkan workspace aktif terakhir (activeWorkspaceId) — chat langsung
+        // terhubung ke workspace sebelumnya tanpa setup ulang. Timeout 3 detik:
+        // bila DataStore belum selesai dimuat, gating UI (workspace_setup) yang
+        // menangani kasus kosong. Workspace SAF sudah punya persistable grant.
+        appScope.launch {
+            val s = withTimeoutOrNull(3000) {
+                settingsRepository.settings.first { it.activeWorkspaceId.isNotBlank() }
+            } ?: return@launch
+            val p = runCatching {
+                workspaceManager.listProjects().firstOrNull { pr -> pr.id == s.activeWorkspaceId }
+            }.getOrNull()
+            if (p != null && activeProject.value == null) {
+                activeProject.value = p
             }
         }
     }

@@ -5,6 +5,7 @@ import android.content.Intent
 import android.util.Log
 import com.openchai.app.OpenChatApp
 import com.openchai.app.OrchestrationEvent
+import com.openchai.core.agent.PermissionContext
 import com.openchai.core.model.AgentStep
 import com.openchai.core.model.ChatMessage
 import com.openchai.core.model.Role
@@ -131,7 +132,16 @@ class DefaultGenerationManager(private val appContext: Context) : GenerationMana
                 .map { (if (it.role == Role.USER) "user" else "assistant") to it.content }
 
             var finalText = ""
-            container.orchestrator.execute(lastUser.content, history).collect { event ->
+            // Permission context gaya Claude Code/OpenCode: mode diambil dari
+            // settings saat run dimulai, broker dibersihkan per-session agar
+            // approval "Always allow" tidak bocor ke run berikutnya.
+            container.permissionBroker.clearSession(sessionId)
+            val wsFs = container.activeProject.value?.let { project ->
+                runCatching { container.workspaceManager.fsFor(project) }.getOrNull()
+            }
+            val mode = container.settingsRepository.settings.value.permissionMode
+            val permission = PermissionContext(mode, container.permissionBroker, sessionId)
+            container.orchestrator.execute(lastUser.content, history, wsFs, permission).collect { event ->
                 when (event) {
                     is OrchestrationEvent.StepsChanged -> steps = event.steps
                     is OrchestrationEvent.PartialAnswer -> partial = event.accumulated

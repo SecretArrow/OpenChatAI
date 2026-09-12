@@ -1,5 +1,6 @@
 package com.openchai.core.settings
 
+import com.openchai.core.agent.PermissionMode
 import com.openchai.core.model.ProviderId
 import kotlinx.coroutines.flow.StateFlow
 
@@ -32,6 +33,10 @@ data class AppSettings(
     // Agent
     val maxAgentIterations: Int = 12,
     val autoApproveCommands: Boolean = false,
+    // Mode izin agent gaya Claude Code/OpenCode (supersede autoApproveCommands)
+    val permissionMode: PermissionMode = PermissionMode.ASK,
+    // Workspace aktif terakhir (Project.id) — dipulihkan saat app start
+    val activeWorkspaceId: String = "",
     // Terminal
     val terminalFontSize: Int = 13,
     val terminalAutoScroll: Boolean = true,

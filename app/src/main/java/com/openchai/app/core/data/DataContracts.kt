@@ -35,9 +35,15 @@ interface WorkspaceManager {
 
     suspend fun createProject(name: String): Project
 
+    /** Buat workspace SAF: subfolder [name] di dalam tree URI pilihan user. */
+    suspend fun createFromTreeUri(treeUriString: String, name: String): Project
+
     suspend fun deleteProject(id: String)
 
     suspend fun renameProject(id: String, newName: String)
+
+    /** [WorkspaceFs] untuk project (File backend utk app-dir, SAF backend utk treeUri). */
+    fun fsFor(project: Project): com.openchai.core.data.WorkspaceFs
 
     fun projectDir(project: Project): File
 

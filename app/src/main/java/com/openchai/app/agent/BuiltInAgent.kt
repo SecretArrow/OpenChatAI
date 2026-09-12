@@ -9,6 +9,13 @@ import com.openchai.core.agent.AgentEngine
 import com.openchai.core.agent.AgentEvent
 import com.openchai.core.agent.AgentRequest
 import com.openchai.core.agent.CommandRunner
+import com.openchai.core.agent.PermissionContext
+import com.openchai.core.agent.PermissionDecision
+import com.openchai.core.agent.PermissionMode
+import com.openchai.core.agent.PermissionRequest
+import com.openchai.core.agent.PermissionRule
+import com.openchai.core.agent.toolCategoryOf
+import com.openchai.core.data.WorkspaceFs
 import com.openchai.core.data.SecureStore
 import com.openchai.core.mcp.AgentMcpBridge
 import com.openchai.core.mcp.McpManager
@@ -26,6 +33,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.serialization.json.JsonObject
+import java.util.UUID
 
 /**
  * Engine agent bawaan: loop tool (pola ReAct) di atas provider AI apa pun.
@@ -66,24 +74,30 @@ class BuiltInAgent(
                 return@flow
             }
             val workspace = request.workspacePath?.trim().orEmpty()
+            val fs = request.workspaceFs
+            val perm = request.permission
 
             emit(AgentEvent.StepUpdated(AgentStep("Analyzing project", StepState.RUNNING)))
-            val workspaceContext = if (workspace.isNotBlank()) {
-                "Workspace: $workspace\n" + AgentTools.listFiles(workspace, ".")
-            } else {
-                ""
+            val workspaceContext = when {
+                fs != null ->
+                    "Workspace: ${fs.rootLabel.ifBlank { "workspace" }}\n" + fs.listFiles(".")
+                workspace.isNotBlank() ->
+                    "Workspace: $workspace\n" + AgentTools.listFiles(workspace, ".")
+                else -> ""
             }
             emit(
                 AgentEvent.StepUpdated(
                     AgentStep(
                         "Analyzing project",
                         StepState.DONE,
-                        detail = workspace.take(80).ifBlank { "No workspace — general mode" }
+                        detail = (fs?.rootLabel ?: workspace).take(80)
+                            .ifBlank { "No workspace — general mode" }
                     )
                 )
             )
 
-            val systemPrompt = buildSystemPrompt(workspaceContext, task)
+            val projectRules = readProjectRules(fs, workspace)
+            val systemPrompt = buildSystemPrompt(workspaceContext, task, perm?.mode, projectRules)
             val chatTail = mutableListOf<Pair<String, String>>()
             var lastAnswer = ""
 
@@ -128,7 +142,7 @@ class BuiltInAgent(
                 for (tc in toolCalls) {
                     val label = humanize(tc.name, tc.args)
                     emit(AgentEvent.StepUpdated(AgentStep(label, StepState.RUNNING)))
-                    val result = executeTool(tc.name, tc.args, workspace, s)
+                    val result = executeTool(tc.name, tc.args, fs, workspace, s, perm)
                     emit(AgentEvent.StepUpdated(AgentStep(label, StepState.DONE, detail = summarize(result))))
                     chatTail.add("user" to "TOOL_RESULT $label:\n$result")
                 }
@@ -146,9 +160,20 @@ class BuiltInAgent(
     // Prompt & messages
     // ------------------------------------------------------------------
 
-    private suspend fun buildSystemPrompt(workspaceContext: String, task: String): String = buildString {
+    private suspend fun buildSystemPrompt(
+        workspaceContext: String,
+        task: String,
+        mode: PermissionMode?,
+        projectRules: String?
+    ): String = buildString {
         appendLine("You are Open Chat AI, a precise and pragmatic coding agent running inside an Android app.")
         appendLine("Complete the user's task inside the workspace, using the tools below when needed.")
+        if (mode != null) appendLine(modeBlock(mode))
+        if (!projectRules.isNullOrBlank()) {
+            appendLine()
+            appendLine("PROJECT RULES (AGENTS.md):")
+            appendLine(projectRules.trim())
+        }
         if (workspaceContext.isNotBlank()) {
             appendLine()
             appendLine(workspaceContext.trim())
@@ -224,39 +249,78 @@ class BuiltInAgent(
     private suspend fun executeTool(
         name: String,
         args: JsonObject,
+        fs: WorkspaceFs?,
         workspace: String,
-        s: AppSettings
+        s: AppSettings,
+        perm: PermissionContext?
     ): String {
-        if (workspace.isBlank()) return "ERROR: No workspace selected. Open a project first."
+        if (workspace.isBlank() && fs == null) {
+            return "ERROR: No workspace selected. Create a workspace first."
+        }
+        // ---- Permission gating (gaya Claude Code / OpenCode) -----------------
+        if (perm != null) {
+            val category = toolCategoryOf(name)
+            when (PermissionRule.decide(perm.mode, category)) {
+                PermissionRule.Action.DENY -> return denyMessage(perm.mode, name)
+                PermissionRule.Action.ASK -> {
+                    val decision = perm.broker.request(
+                        PermissionRequest(
+                            id = "perm-" + UUID.randomUUID().toString(),
+                            sessionId = perm.sessionId,
+                            toolName = name,
+                            category = category,
+                            detail = permissionDetail(name, args),
+                            isDangerous = isDangerousTool(name, args)
+                        )
+                    )
+                    if (decision is PermissionDecision.Deny) {
+                        return "ERROR: user denied tool '$name'. Continue without it or " +
+                            "finish with what you have."
+                    }
+                    // AllowOnce / AllowSession → lanjut eksekusi.
+                }
+                PermissionRule.Action.AUTO -> Unit
+            }
+        }
         return try {
             when (name) {
-                "list_files" -> AgentTools.listFiles(workspace, args.jsonStr("path") ?: ".")
+                "list_files" -> {
+                    val p = args.jsonStr("path") ?: "."
+                    fs?.listFiles(p) ?: AgentTools.listFiles(workspace, p)
+                }
                 "read_file" -> {
                     val path = args.jsonStr("path")
                     if (path.isNullOrBlank()) "ERROR: read_file requires a 'path' argument."
-                    else AgentTools.readFile(workspace, path)
+                    else fs?.readFile(path) ?: AgentTools.readFile(workspace, path)
                 }
                 "write_file" -> {
                     val path = args.jsonStr("path")
                     if (path.isNullOrBlank()) "ERROR: write_file requires a 'path' argument."
-                    else AgentTools.writeFile(workspace, path, args.jsonStr("content") ?: "")
+                    else writeFileWithDiff(fs, workspace, path, args.jsonStr("content") ?: "")
                 }
                 "delete_file" -> {
                     val path = args.jsonStr("path")
                     if (path.isNullOrBlank()) "ERROR: delete_file requires a 'path' argument."
-                    else AgentTools.deleteFile(workspace, path)
+                    else fs?.deleteFile(path) ?: AgentTools.deleteFile(workspace, path)
                 }
                 "search" -> {
                     val query = args.jsonStr("query")
                     if (query.isNullOrBlank()) "ERROR: search requires a 'query' argument."
-                    else AgentTools.search(workspace, query)
+                    else fs?.search(query) ?: AgentTools.search(workspace, query)
                 }
                 "run_command" -> {
+                    if (fs != null && !fs.supportsShell) {
+                        return "ERROR: run_command is unavailable for picked-folder (SAF) " +
+                            "workspaces — use the file tools instead."
+                    }
+                    // Legacy (tanpa permission context): tetap dijaga auto-approve.
+                    if (perm == null && !s.autoApproveCommands) {
+                        return "ERROR: Command execution is disabled. Enable Full access (YOLO) " +
+                            "mode or Auto-approve in Settings → Agent."
+                    }
                     val command = args.jsonStr("command")
                     if (command.isNullOrBlank()) {
                         "ERROR: run_command requires a 'command' argument."
-                    } else if (!s.autoApproveCommands) {
-                        "ERROR: Command execution is disabled. Enable Auto-approve in Settings → Agent."
                     } else {
                         val res = runner.run(command, workspace, 120_000L)
                         val combined = buildString {
@@ -281,6 +345,99 @@ class BuiltInAgent(
         } catch (e: Exception) {
             "ERROR: ${e.message ?: "tool '$name' failed"}"
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Permission helpers (gaya Claude Code / OpenCode)
+    // ------------------------------------------------------------------
+
+    /** Pesan penolakan otomatis; PLAN memandu model menyusun rencana. */
+    private fun denyMessage(mode: PermissionMode, name: String): String =
+        if (mode == PermissionMode.PLAN) {
+            "PLAN MODE: read-only. Tool '$name' is blocked in plan mode — do NOT attempt " +
+                "modifications. Research the workspace with read tools, then present a concise " +
+                "numbered implementation plan as your FINAL answer (files to create/change, " +
+                "key steps, risks)."
+        } else {
+            "ERROR: tool '$name' is denied in ${mode.name} mode."
+        }
+
+    private fun permissionDetail(name: String, args: JsonObject): String = when (name) {
+        "run_command" -> args.jsonStr("command")?.trim()?.take(200) ?: "(no command)"
+        "read_file", "write_file", "delete_file" -> args.jsonStr("path")?.trim()?.take(200) ?: "(no path)"
+        "search" -> args.jsonStr("query")?.trim()?.take(120) ?: "(no query)"
+        else -> name
+    }
+
+    private fun isDangerousTool(name: String, args: JsonObject): Boolean = when (name) {
+        "delete_file" -> true
+        "run_command" -> DANGEROUS_COMMAND.containsMatchIn(args.jsonStr("command").orEmpty())
+        else -> false
+    }
+
+    /** Tulis file + ringkasan diff ringkas bila file sudah ada (fs backend saja). */
+    private fun writeFileWithDiff(
+        fs: WorkspaceFs?,
+        workspace: String,
+        path: String,
+        content: String
+    ): String {
+        if (fs != null) {
+            val old = if (fs.exists(path)) fs.readFile(path).takeIf { !it.startsWith("ERROR") } else null
+            val res = fs.writeFile(path, content)
+            if (res.startsWith("ERROR")) return res
+            val diff = old?.let { diffSummary(it, content) }
+            return if (diff != null) "$res · $diff" else res
+        }
+        return AgentTools.writeFile(workspace, path, content)
+    }
+
+    /** Estimasi diff berbasis himpunan baris (murah, cukup untuk step detail). */
+    private fun diffSummary(old: String, new: String): String {
+        val oldLines = old.lines().filter { it.isNotBlank() }.toSet()
+        val newLines = new.lines().filter { it.isNotBlank() }.toSet()
+        val removed = oldLines.count { it !in newLines }
+        val added = newLines.count { it !in oldLines }
+        return "+$added -$removed lines"
+    }
+
+    /**
+     * Rules file gaya OpenCode/Claude: AGENTS.md → CLAUDE.md dari root workspace.
+     * Maks 4000 karakter; null bila tidak ada.
+     */
+    private fun readProjectRules(fs: WorkspaceFs?, workspace: String): String? {
+        val fromFs = fs?.let { f ->
+            listOf("AGENTS.md", "CLAUDE.md").firstNotNullOfOrNull { rulesName ->
+                f.readFile(rulesName).takeIf { !it.startsWith("ERROR") }
+            }
+        }
+        if (fromFs != null) return fromFs.take(4000)
+        if (workspace.isNotBlank()) {
+            listOf("AGENTS.md", "CLAUDE.md").forEach { rulesName ->
+                val file = java.io.File(workspace, rulesName)
+                if (file.isFile) {
+                    val text = runCatching { file.readText() }.getOrNull()
+                    if (!text.isNullOrBlank()) return text.take(4000)
+                }
+            }
+        }
+        return null
+    }
+
+    private fun modeBlock(mode: PermissionMode): String = when (mode) {
+        PermissionMode.ASK ->
+            "PERMISSION MODE: ASK — write/delete/command tools will ask the user for " +
+                "approval; prefer minimal, well-explained changes."
+        PermissionMode.PLAN ->
+            "PERMISSION MODE: PLAN — read-only research mode. Do not modify anything. " +
+                "Investigate the workspace, then deliver a numbered implementation plan " +
+                "as your FINAL answer."
+        PermissionMode.AUTO_READ_EDIT ->
+            "PERMISSION MODE: AUTO READ-EDIT — file reads and writes are auto-approved; " +
+                "commands, deletes and MCP tools ask for approval."
+        PermissionMode.FULL_ACCESS ->
+            "PERMISSION MODE: FULL ACCESS (YOLO) — all tools are auto-approved; still " +
+                "avoid destructive actions unless the task demands them."
     }
 
     // ------------------------------------------------------------------
@@ -314,6 +471,12 @@ class BuiltInAgent(
 
     private companion object {
         const val MAX_COMMAND_OUTPUT = 4000
+
+        /** Pola command berbahaya untuk badge isDangerous di dialog izin. */
+        val DANGEROUS_COMMAND = Regex(
+            "rm\\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)|mkfs|dd\\s+if=|" +
+                "chmod\\s+-R\\s+777|shutdown|reboot|:\\(\\)\\s*\\{"
+        )
     }
 }
 

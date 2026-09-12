@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.openchai.app.ui.components.StatusDot
+import com.openchai.core.agent.PermissionMode
 import com.openchai.core.model.ProviderId
 import com.openchai.core.settings.AppSettings
 import com.openchai.core.settings.ChatDensity
@@ -207,15 +208,11 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                             vm.update { it.copy(maxAgentIterations = v.roundToInt()) }
                         }
                     )
-                    SwitchRow(
-                        title = "Auto-approve commands",
-                        subtitle = "Run agent shell commands without asking first.",
-                        checked = settings.autoApproveCommands,
-                        onCheckedChange = { value ->
-                            vm.update { it.copy(autoApproveCommands = value) }
-                        }
-                    )
-                    if (settings.autoApproveCommands) {
+                    Text("Permission mode", style = MaterialTheme.typography.bodyLarge)
+                    PermissionModeOptions(selected = settings.permissionMode) { mode ->
+                        vm.update { it.copy(permissionMode = mode) }
+                    }
+                    if (settings.permissionMode == PermissionMode.FULL_ACCESS) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -227,7 +224,8 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                "Commands run inside your workspace sandbox",
+                                "Everything runs without confirmation — use only " +
+                                    "in a trusted sandbox",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.error
                             )
@@ -426,6 +424,41 @@ private fun ChatDensityRow(selected: ChatDensity, onSelect: (ChatDensity) -> Uni
             onClick = { onSelect(ChatDensity.COMFORTABLE) },
             label = { Text("Comfortable") }
         )
+    }
+}
+
+/** Pemilih mode izin agent: 4 radio + deskripsi 1 baris per mode. */
+private val PERMISSION_MODE_ITEMS = listOf(
+    Triple(PermissionMode.ASK, "Ask", "Confirm every write, delete and command"),
+    Triple(PermissionMode.PLAN, "Plan", "Read-only research, then a plan"),
+    Triple(PermissionMode.AUTO_READ_EDIT, "Auto read-edit", "Reads and edits auto-approved"),
+    Triple(PermissionMode.FULL_ACCESS, "Full access (YOLO)", "Everything auto-approved — dangerous")
+)
+
+@Composable
+private fun PermissionModeOptions(selected: PermissionMode, onSelect: (PermissionMode) -> Unit) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        PERMISSION_MODE_ITEMS.forEach { (mode, label, description) ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelect(mode) }
+            ) {
+                RadioButton(
+                    selected = selected == mode,
+                    onClick = { onSelect(mode) }
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 

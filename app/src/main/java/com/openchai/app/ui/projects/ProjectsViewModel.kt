@@ -15,20 +15,34 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
+/**
+ * ViewModel workspace (dipakai ProjectsScreen & WorkspaceSetupScreen).
+ *
+ * "Workspace" = proyek aktif untuk agent: app-dir (di penyimpanan aplikasi)
+ * atau SAF (subfolder di dalam folder pilihan user, [Project.treeUri] non-null).
+ * Workspace aktif adalah satu sumber kebenaran di [com.openchai.app.AppContainer];
+ * perubahan juga dicatat di settings (activeWorkspaceId) agar dipulihkan
+ * saat app dimulai ulang.
+ */
 class ProjectsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val container = (app as OpenChatApp).container
 
-    private val _projects = MutableStateFlow<List<Project>>(emptyList())
-    val projects: StateFlow<List<Project>> = _projects.asStateFlow()
+    private val _workspaces = MutableStateFlow<List<Project>>(emptyList())
+    val workspaces: StateFlow<List<Project>> = _workspaces.asStateFlow()
 
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
 
-    /** Jumlah file per project id (pemindaian dibatasi agar refresh tetap murah). */
+    /** Jumlah file per workspace id (pemindaian dibatasi; SAF tidak discan → 0). */
     private val _fileCounts = MutableStateFlow<Map<String, Int>>(emptyMap())
     val fileCounts: StateFlow<Map<String, Int>> = _fileCounts.asStateFlow()
+
+    /** Pesan kegagalan terakhir (mis. provider menolak membuat folder) — null = tidak ada. */
+    private val _lastError = MutableStateFlow<String?>(null)
+    val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
     /** Nama proyek hasil import terakhir (null = belum ada / import dibatalkan / gagal). */
     private val _importedProject = MutableStateFlow<String?>(null)
@@ -39,10 +53,19 @@ class ProjectsViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refresh()
+        // Daftar workspace ikut di-refresh saat workspace aktif berubah (mis.
+        // dibuat/dipilih dari layar lain) agar badge "Active" tetap akurat.
+        viewModelScope.launch {
+            container.activeProject.collect { refresh() }
+        }
+    }
+
+    fun clearError() {
+        _lastError.value = null
     }
 
     // ------------------------------------------------------------------
-    // Muat ulang daftar proyek + hitung file singkat
+    // Muat ulang daftar workspace + hitung file singkat
     // ------------------------------------------------------------------
 
     fun refresh() {
@@ -50,60 +73,111 @@ class ProjectsViewModel(app: Application) : AndroidViewModel(app) {
             _loading.value = true
             val projects = runCatching { container.workspaceManager.listProjects() }
                 .getOrDefault(emptyList())
-            _projects.value = projects
+            _workspaces.value = projects
             _fileCounts.value = projects.associate { it.id to countFiles(it) }
             _loading.value = false
         }
     }
 
-    private fun countFiles(project: Project): Int = try {
-        val dir = container.workspaceManager.projectDir(project)
-        if (dir.exists()) {
-            dir.walkTopDown()
-                .filter { it.isFile }
-                .take(MAX_SCAN_FILES + 1)
-                .count()
-                .coerceAtMost(MAX_SCAN_FILES)
-        } else 0
-    } catch (_: Exception) {
-        0
-    }
-
-    // ------------------------------------------------------------------
-    // Aksi proyek
-    // ------------------------------------------------------------------
-
-    fun createProject(name: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { container.workspaceManager.createProject(name) }
-            refresh()
+    private fun countFiles(project: Project): Int {
+        // Workspace SAF tidak discan dari path (folder milik user di luar app).
+        if (project.treeUri != null) return 0
+        return try {
+            val dir = container.workspaceManager.projectDir(project)
+            if (dir.exists()) {
+                dir.walkTopDown()
+                    .filter { it.isFile }
+                    .take(MAX_SCAN_FILES + 1)
+                    .count()
+                    .coerceAtMost(MAX_SCAN_FILES)
+            } else 0
+        } catch (_: Exception) {
+            0
         }
     }
 
-    fun deleteProject(id: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { container.workspaceManager.deleteProject(id) }
+    // ------------------------------------------------------------------
+    // Aksi workspace
+    // ------------------------------------------------------------------
+
+    /**
+     * Tandai workspace aktif: set [com.openchai.app.AppContainer.activeProject]
+     * + simpan activeWorkspaceId di settings (field lain dipertahankan).
+     * Navigasi ke Chat dilakukan UI lewat callback.
+     */
+    fun setActive(project: Project) {
+        viewModelScope.launch {
+            container.activeProject.value = project
+            runCatching {
+                container.settingsRepository.update { it.copy(activeWorkspaceId = project.id) }
+            }
+        }
+    }
+
+    /** Workspace app-dir baru (createProject) + langsung diaktifkan. */
+    fun createAppWorkspace(name: String, onDone: (Project) -> Unit) {
+        viewModelScope.launch {
+            val project = withContext(Dispatchers.IO) {
+                runCatching { container.workspaceManager.createProject(name) }.getOrNull()
+            }
+            if (project != null) {
+                setActive(project)
+                refresh()
+                onDone(project)
+            } else {
+                _lastError.value = "Could not create app workspace"
+            }
+        }
+    }
+
+    /**
+     * Workspace SAF baru: subfolder di dalam folder pilihan user
+     * (createFromTreeUri) + langsung diaktifkan.
+     */
+    fun createSafWorkspace(treeUriString: String, name: String, onDone: (Project) -> Unit) {
+        viewModelScope.launch {
+            val project = withContext(Dispatchers.IO) {
+                runCatching { container.workspaceManager.createFromTreeUri(treeUriString, name) }
+                    .getOrNull()
+            }
+            if (project != null) {
+                setActive(project)
+                refresh()
+                onDone(project)
+            } else {
+                _lastError.value = "Could not create workspace in the selected folder"
+            }
+        }
+    }
+
+    /** Hapus workspace: app-dir → folder dihapus; SAF → hanya link yang dilepas. */
+    fun deleteWorkspace(id: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { container.workspaceManager.deleteProject(id) }
+            }
             if (container.activeProject.value?.id == id) {
                 container.activeProject.value = null
+                runCatching {
+                    container.settingsRepository.update { it.copy(activeWorkspaceId = "") }
+                }
             }
             refresh()
         }
     }
 
+    /** Rename tampilan (SAF: hanya nama di json — folder fisik tidak disentuh). */
     fun renameProject(id: String, name: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { container.workspaceManager.renameProject(id, name) }
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { container.workspaceManager.renameProject(id, name) }
+            }
             refresh()
         }
     }
 
-    /** Tandai proyek aktif; navigasi ke Chat dilakukan UI lewat callback onProjectSelected. */
-    fun openProject(project: Project) {
-        container.activeProject.value = project
-    }
-
     // ------------------------------------------------------------------
-    // Import folder (document tree) ke proyek baru
+    // Import folder (document tree) ke proyek app-dir baru
     // ------------------------------------------------------------------
 
     /**
