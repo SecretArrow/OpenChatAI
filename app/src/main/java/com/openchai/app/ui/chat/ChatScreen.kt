@@ -106,7 +106,7 @@ fun ChatScreen(
                 .format(java.util.Date())
             appendLine(
                 "_Project: ${activeProject?.name?.takeIf { it.isNotBlank() } ?: "-"} · " +
-                    "Model: ${settings.selectedModel.ifBlank { "auto" }} · $now_"
+                    "Model: ${settings.selectedModel.ifBlank { "auto" }} · ${now}_"
             )
             appendLine()
             messages.forEach { m ->

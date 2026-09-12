@@ -233,7 +233,8 @@ fun TerminalPanel(
                             QUICK_COMMANDS.forEach { cmd ->
                                 AssistChip(
                                     onClick = {
-                                        if (selectedSessionId != null) vm.write(selectedSessionId, cmd)
+                                        val sid = selectedSessionId
+                                        if (sid != null) vm.write(sid, cmd)
                                     },
                                     label = {
                                         Text(
