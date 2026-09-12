@@ -27,7 +27,7 @@ import com.openchai.core.data.WorkspaceFs
  * list 2 level maks 80 entri ("d name/" / "- name (N bytes)"), read 16 KB,
  * search maks 400 file ≤512 KB 40 match ("rel:line: teks").
  */
-class SafWorkspaceFs(context: Context, treeUriString: String) : WorkspaceFs {
+class SafWorkspaceFs(context: Context, private val treeUriString: String) : WorkspaceFs {
 
     private val resolver = context.applicationContext.contentResolver
     private val treeUri: Uri = Uri.parse(treeUriString)
@@ -184,7 +184,8 @@ class SafWorkspaceFs(context: Context, treeUriString: String) : WorkspaceFs {
     // WorkspaceFs
     // ------------------------------------------------------------------
 
-    override fun listFiles(relPath: String): String = try {
+    override fun listFiles(relPath: String): String {
+        return try {
         val dirDocId = resolveDocId(relPath)
             ?: return "ERROR: Not found: $relPath"
         if (docMime(dirDocId) != DocumentsContract.Document.MIME_TYPE_DIR) {
@@ -226,8 +227,10 @@ class SafWorkspaceFs(context: Context, treeUriString: String) : WorkspaceFs {
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "list failed"}"
     }
+    }
 
-    override fun readFile(relPath: String): String = try {
+    override fun readFile(relPath: String): String {
+        return try {
         val docId = resolveDocId(relPath)
             ?: return "ERROR: Not found: $relPath"
         if (docMime(docId) == DocumentsContract.Document.MIME_TYPE_DIR) {
@@ -258,8 +261,10 @@ class SafWorkspaceFs(context: Context, treeUriString: String) : WorkspaceFs {
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "read failed"}"
     }
+    }
 
-    override fun writeFile(relPath: String, content: String): String = try {
+    override fun writeFile(relPath: String, content: String): String {
+        return try {
         if (relPath.isBlank()) return "ERROR: Empty path"
         val segs = splitSegments(relPath)
             ?.takeIf { it.isNotEmpty() }
@@ -308,8 +313,10 @@ class SafWorkspaceFs(context: Context, treeUriString: String) : WorkspaceFs {
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "write failed"}"
     }
+    }
 
-    override fun deleteFile(relPath: String): String = try {
+    override fun deleteFile(relPath: String): String {
+        return try {
         val docId = resolveDocId(relPath)
             ?: return "ERROR: Not found: $relPath"
         // Lindungi root workspace dari penghapusan (provider menghapus
@@ -320,8 +327,10 @@ class SafWorkspaceFs(context: Context, treeUriString: String) : WorkspaceFs {
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "delete failed"}"
     }
+    }
 
-    override fun search(query: String): String = try {
+    override fun search(query: String): String {
+        return try {
         if (query.isBlank()) return "ERROR: Empty search query"
         val needle = query.lowercase()
         val matches = mutableListOf<String>()
@@ -363,6 +372,7 @@ class SafWorkspaceFs(context: Context, treeUriString: String) : WorkspaceFs {
         }
     } catch (e: Exception) {
         "ERROR: ${e.message ?: "search failed"}"
+    }
     }
 
     override fun exists(relPath: String): Boolean = try {
