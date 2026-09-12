@@ -33,6 +33,7 @@ import com.openchai.app.ui.chat.ChatViewModel
 import com.openchai.app.ui.history.HistoryScreen
 import com.openchai.app.ui.models.ModelsScreen
 import com.openchai.app.ui.projects.ProjectsScreen
+import com.openchai.app.ui.runtime.RuntimeScreen
 import com.openchai.app.ui.sessions.SessionsDrawer
 import com.openchai.app.ui.settings.SettingsScreen
 import com.openchai.app.ui.workspace.WorkspaceSetupScreen
@@ -45,6 +46,9 @@ object Routes {
     const val PROJECTS = "projects"
     const val SETTINGS = "settings"
     const val MODELS = "models"
+
+    /** Layar kelola runtime llama.cpp & modul (akses dari Settings). */
+    const val RUNTIME = "runtime"
 
     /** Layar setup workspace (wajib sebelum chat Agent mode). */
     const val WORKSPACE_SETUP = "workspace_setup"
@@ -195,7 +199,14 @@ fun AppNavGraph(container: AppContainer) {
                     )
                 }
                 composable(Routes.SETTINGS) {
-                    SettingsScreen()
+                    SettingsScreen(
+                        onOpenRuntime = {
+                            navController.navigate(Routes.RUNTIME) { launchSingleTop = true }
+                        }
+                    )
+                }
+                composable(Routes.RUNTIME) {
+                    RuntimeScreen()
                 }
             }
         }

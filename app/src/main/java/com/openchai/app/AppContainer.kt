@@ -21,6 +21,7 @@ import com.openchai.core.settings.SettingsRepository
 import com.openchai.core.terminal.TerminalHost
 import com.openchai.core.llm.LlamaEngine
 import com.openchai.core.llm.ModelManager
+import com.openchai.core.llm.RuntimeManager
 import com.openchai.core.mcp.McpManagerProvider
 import com.openchai.core.skills.SkillLoaderProvider
 import com.openchai.data.AndroidWorkspaceManager
@@ -57,6 +58,10 @@ class AppContainer(context: Context) {
     val activeProject = MutableStateFlow<Project?>(null)
 
     // AI lokal on-device (llama.cpp)
+    // RuntimeManager HARUS dibuat sebelum llamaEngine: ctor-nya memindah pack
+    // runtime terpasang dan men-set LlamaBridge.overrideLibPath sebelum lib
+    // native dimuat pertama kali.
+    val runtimeManager: RuntimeManager = RuntimeManager(context, appScope)
     val modelManager: ModelManager = ModelManager(context, appScope)
     val llamaEngine: LlamaEngine = LlamaEngine.getInstance(context)
 

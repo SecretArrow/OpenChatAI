@@ -7,15 +7,59 @@ package com.openchai.core.llm
  * diserialisasi dari sisi Kotlin (lihat [LlamaEngine] yang memakai Mutex).
  * Generasi dijalankan pada thread pemanggil; pembatalan dilakukan dengan
  * mengembalikan `false` dari [TokenCallback.onToken].
+ *
+ * Pemuatan library bersifat lazy: pemanggil WAJIB melewati [ensureLoaded] /
+ * [backendInitOnce] sebelum memanggil external fun mana pun ([LlamaEngine]
+ * sudah mematuhi kontrak ini). Kontrak JNI tidak berubah — NAMA SEMUA
+ * external fun tetap sama (standard JNI naming, lihat llama_jni.cpp).
  */
 object LlamaBridge {
 
-    init {
-        System.loadLibrary("openchai_llama")
+    /** Path absolut libopenchai_llama.so dari runtime pack terpasang (di-set RuntimeManager sebelum pemakaian pertama). */
+    @Volatile
+    var overrideLibPath: String? = null
+
+    @Volatile
+    private var loaded = false
+
+    private val loadLock = Any()
+
+    /**
+     * Muat library native tepat satu kali: prioritas runtime pack terpasang
+     * (System.load path absolut) dengan fallback otomatis ke library bawaan APK
+     * (System.loadLibrary) bila pack gagal dimuat/tidak ada. Idempoten dan
+     * thread-safe.
+     */
+    fun ensureLoaded() {
+        if (loaded) return
+        synchronized(loadLock) {
+            if (loaded) return
+            val libOverride = overrideLibPath
+            if (libOverride != null) {
+                try {
+                    System.load(libOverride)
+                    loaded = true
+                    return
+                } catch (_: Throwable) {
+                    // Pack gagal dimuat (file rusak / ABI salah) → buang override
+                    // dan jatuh ke library bawaan APK.
+                    overrideLibPath = null
+                }
+            }
+            System.loadLibrary("openchai_llama")
+            loaded = true
+        }
     }
 
-    /** Inisialisasi global llama.cpp (idempoten, aman dipanggil berulang). */
-    fun backendInitOnce() = backendInit()
+    /**
+     * Inisialisasi global llama.cpp (idempoten, aman dipanggil berulang).
+     * Wajib dipanggil lebih dulu oleh pemanggil external fun: di sini library
+     * native dimuat via [ensureLoaded] sebelum init backend.
+     */
+    fun backendInitOnce() {
+        ensureLoaded()
+        backendInit()
+    }
 
     private external fun backendInit()
 

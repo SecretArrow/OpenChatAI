@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AssistChip
@@ -58,7 +59,7 @@ import kotlin.math.roundToInt
  * appearance, dan status runtime. Tanpa bottom bar sendiri.
  */
 @Composable
-fun SettingsScreen(modifier: Modifier = Modifier) {
+fun SettingsScreen(modifier: Modifier = Modifier, onOpenRuntime: () -> Unit = {}) {
     val vm: SettingsViewModel = viewModel()
     val settings by vm.settings.collectAsStateWithLifecycle()
 
@@ -159,6 +160,27 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                }
+            }
+            // ------------------------------------------------------------
+            item {
+                SectionCard("RUNTIME & MODUL") {
+                    // Row klikable → buka layar Runtime & Modul (kelola pack).
+                    Row(
+                        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenRuntime),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Info, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text("Runtime & Modul", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Kelola runtime llama.cpp & modul — pasang/hapus, jeda/lanjut unduhan",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
