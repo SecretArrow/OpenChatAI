@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Singleton via [McpManagerProvider]; UI Settings dan agent memakai instance
  * yang sama sehingga status di UI selalu sinkron dengan koneksi agent.
  */
-class McpManager private constructor(context: Context) {
+class McpManager internal constructor(context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val file = File(context.applicationContext.filesDir, STORAGE_FILE)

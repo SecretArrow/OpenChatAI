@@ -415,7 +415,7 @@ class McpClient(private val config: McpServerConfig) {
         }
         val deferred = CompletableDeferred<RpcResponse>()
         session.pending[id] = deferred
-        try {
+        return try {
             try {
                 writeToStdin(session, json.encodeToString(RpcRequest.serializer(), request))
             } catch (e: IOException) {

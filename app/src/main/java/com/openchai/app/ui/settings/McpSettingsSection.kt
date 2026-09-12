@@ -59,7 +59,8 @@ import java.util.UUID
  */
 @Composable
 fun McpSettingsSection(modifier: Modifier = Modifier) {
-    val manager = remember { McpManagerProvider.get(LocalContext.current) }
+    val context = LocalContext.current
+    val manager = remember { McpManagerProvider.get(context.applicationContext) }
     val configs by manager.configs.collectAsStateWithLifecycle()
     val health by manager.health.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()

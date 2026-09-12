@@ -287,18 +287,23 @@ class BuiltInAgent(
     // Label human-readable (tampil di chat)
     // ------------------------------------------------------------------
 
-    private fun humanize(name: String, args: JsonObject): String = when (name) {
-        "list_files" -> {
-            val p = args.jsonStr("path").orEmpty().trim()
-            if (p.isEmpty() || p == "." || p == "./") "Exploring project" else "Listing $p"
+    private fun humanize(name: String, args: JsonObject): String {
+        // Tool MCP (mcp_<server>_<tool>) dicek dulu — bukan cabang when ber-subjek.
+        if (name.startsWith("mcp_")) {
+            return "Calling ${name.removePrefix("mcp_").replace('_', ' ').trim()}"
         }
-        "read_file" -> "Reading ${labelPath(args, "path")}"
-        "write_file" -> "Writing ${labelPath(args, "path")}"
-        "delete_file" -> "Deleting ${labelPath(args, "path")}"
-        "search" -> "Searching '${args.jsonStr("query")?.trim()?.take(40).orEmpty()}'"
-        "run_command" -> "Running: ${args.jsonStr("command")?.trim()?.take(60).orEmpty()}"
-        name.startsWith("mcp_") -> "Calling ${name.removePrefix("mcp_").replace('_', ' ').trim()}"
-        else -> "Using tool $name"
+        return when (name) {
+            "list_files" -> {
+                val p = args.jsonStr("path").orEmpty().trim()
+                if (p.isEmpty() || p == "." || p == "./") "Exploring project" else "Listing $p"
+            }
+            "read_file" -> "Reading ${labelPath(args, "path")}"
+            "write_file" -> "Writing ${labelPath(args, "path")}"
+            "delete_file" -> "Deleting ${labelPath(args, "path")}"
+            "search" -> "Searching '${args.jsonStr("query")?.trim()?.take(40).orEmpty()}'"
+            "run_command" -> "Running: ${args.jsonStr("command")?.trim()?.take(60).orEmpty()}"
+            else -> "Using tool $name"
+        }
     }
 
     private fun labelPath(args: JsonObject, key: String): String =
