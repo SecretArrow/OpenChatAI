@@ -56,36 +56,6 @@ data class EngineStatus(
 )
 
 /**
- * State uji model satu klik (Model Selector → tombol "Test").
- *  - Running : pengujian berjalan (spinner + Cancel).
- *  - Result  : sukses — balasan model + durasi.
- *  - Failed  : gagal — error ringkas + detail penuh untuk "View details".
- */
-sealed class ModelTestUi {
-    abstract val providerId: ProviderId
-    abstract val model: String
-
-    data class Running(
-        override val providerId: ProviderId,
-        override val model: String
-    ) : ModelTestUi()
-
-    data class Result(
-        override val providerId: ProviderId,
-        override val model: String,
-        val reply: String,
-        val durationMs: Long
-    ) : ModelTestUi()
-
-    data class Failed(
-        override val providerId: ProviderId,
-        override val model: String,
-        val error: String,
-        val detail: String?
-    ) : ModelTestUi()
-}
-
-/**
  * ViewModel chat multi-sesi: UI hanya menyiapkan data di store lalu memulai /
  * membatalkan generasi lewat [com.openchatai.app.background.GenerationManager]
  * (app-scoped, mendukung banyak sesi paralel). Logika orchestrator pindah
@@ -137,6 +107,36 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val modelTest: StateFlow<ModelTestUi?> = _modelTest.asStateFlow()
 
     private var modelTestJob: Job? = null
+
+    /**
+     * State uji model satu klik (Model Selector → tombol "Test").
+     *  - Running : pengujian berjalan (spinner + Cancel).
+     *  - Result  : sukses — balasan model + durasi.
+     *  - Failed  : gagal — error ringkas + detail penuh untuk "View details".
+     */
+    sealed class ModelTestUi {
+        abstract val providerId: ProviderId
+        abstract val model: String
+
+        data class Running(
+            override val providerId: ProviderId,
+            override val model: String
+        ) : ModelTestUi()
+
+        data class Result(
+            override val providerId: ProviderId,
+            override val model: String,
+            val reply: String,
+            val durationMs: Long
+        ) : ModelTestUi()
+
+        data class Failed(
+            override val providerId: ProviderId,
+            override val model: String,
+            val error: String,
+            val detail: String?
+        ) : ModelTestUi()
+    }
 
     private val _models = MutableStateFlow<Map<ProviderId, List<ModelInfo>>>(emptyMap())
     val models: StateFlow<Map<ProviderId, List<ModelInfo>>> = _models.asStateFlow()
