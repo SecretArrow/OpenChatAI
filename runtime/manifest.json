@@ -1,32 +1,32 @@
 {
   "schema": 1,
-  "version": "1.8.0",
+  "version": "1.8.1",
   "packs": [
     {
       "id": "llama-cpu-arm64-v8a",
       "kind": "RUNTIME",
       "name": "llama.cpp CPU (arm64-v8a)",
-      "version": "1.8.0",
+      "version": "1.8.1",
       "abi": "arm64-v8a",
       "feature": "local-inference",
       "required": false,
       "sizeBytes": 2708140,
       "sha256": "d81b045d3b450a5e2f622d5e2b4944314fdbf1cd7901e67415acaca70e15300d",
-      "url": "https://github.com/SecretArrow/OpenChatAI/releases/download/v1.8.0/runtime-llama-cpu-arm64-v8a.zip",
-      "description": "libopenchai_llama.so (llama.cpp b10919, ggml statis) dari rilis v1.8.0 \u2014 diperbarui tanpa memperbarui APK."
+      "url": "https://github.com/SecretArrow/OpenChatAI/releases/download/v1.8.1/runtime-llama-cpu-arm64-v8a.zip",
+      "description": "libopenchai_llama.so (llama.cpp b10919, ggml statis) dari rilis v1.8.1 \u2014 diperbarui tanpa memperbarui APK."
     },
     {
       "id": "llama-cpu-x86_64",
       "kind": "RUNTIME",
       "name": "llama.cpp CPU (x86_64)",
-      "version": "1.8.0",
+      "version": "1.8.1",
       "abi": "x86_64",
       "feature": "local-inference",
       "required": false,
       "sizeBytes": 3070973,
       "sha256": "aa373c1d57d56d775e6820c84bec1315a051fb9da3252dfe2baf6cc1079c2e9c",
-      "url": "https://github.com/SecretArrow/OpenChatAI/releases/download/v1.8.0/runtime-llama-cpu-x86_64.zip",
-      "description": "libopenchai_llama.so (llama.cpp b10919, ggml statis) dari rilis v1.8.0 \u2014 diperbarui tanpa memperbarui APK."
+      "url": "https://github.com/SecretArrow/OpenChatAI/releases/download/v1.8.1/runtime-llama-cpu-x86_64.zip",
+      "description": "libopenchai_llama.so (llama.cpp b10919, ggml statis) dari rilis v1.8.1 \u2014 diperbarui tanpa memperbarui APK."
     }
   ]
 }
