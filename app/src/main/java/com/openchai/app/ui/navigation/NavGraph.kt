@@ -5,6 +5,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -24,6 +25,7 @@ import com.openchai.app.AppContainer
 import com.openchai.app.ui.chat.ChatScreen
 import com.openchai.app.ui.chat.ChatViewModel
 import com.openchai.app.ui.history.HistoryScreen
+import com.openchai.app.ui.models.ModelsScreen
 import com.openchai.app.ui.projects.ProjectsScreen
 import com.openchai.app.ui.settings.SettingsScreen
 
@@ -32,6 +34,7 @@ object Routes {
     const val HISTORY = "history"
     const val PROJECTS = "projects"
     const val SETTINGS = "settings"
+    const val MODELS = "models"
 }
 
 @Composable
@@ -64,6 +67,12 @@ fun AppNavGraph(container: AppContainer) {
                     onClick = { navigateTo(navController, Routes.PROJECTS) },
                     icon = { Icon(Icons.Filled.Build, contentDescription = "Projects") },
                     label = { Text("Projects") }
+                )
+                NavigationBarItem(
+                    selected = currentRoute == Routes.MODELS,
+                    onClick = { navigateTo(navController, Routes.MODELS) },
+                    icon = { Icon(Icons.Filled.List, contentDescription = "Models") },
+                    label = { Text("Models") }
                 )
                 NavigationBarItem(
                     selected = currentRoute == Routes.SETTINGS,
@@ -101,6 +110,13 @@ fun AppNavGraph(container: AppContainer) {
             composable(Routes.PROJECTS) {
                 ProjectsScreen(
                     onProjectSelected = {
+                        navigateTo(navController, Routes.CHAT)
+                    }
+                )
+            }
+            composable(Routes.MODELS) {
+                ModelsScreen(
+                    onOpenChat = {
                         navigateTo(navController, Routes.CHAT)
                     }
                 )

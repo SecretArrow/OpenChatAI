@@ -12,14 +12,16 @@ class ProviderRegistry(
     val openai: AiProvider,
     val anthropic: AiProvider,
     val google: AiProvider,
-    val custom: AiProvider
+    val custom: AiProvider,
+    val local: AiProvider
 ) {
     private val map: Map<ProviderId, AiProvider> = mapOf(
         ProviderId.OLLAMA to ollama,
         ProviderId.OPENAI to openai,
         ProviderId.ANTHROPIC to anthropic,
         ProviderId.GOOGLE to google,
-        ProviderId.CUSTOM to custom
+        ProviderId.CUSTOM to custom,
+        ProviderId.LOCAL to local
     )
 
     fun get(id: ProviderId): AiProvider? = map[id]

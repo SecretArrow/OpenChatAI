@@ -47,7 +47,7 @@ data class Project(
     val lastOpenedAt: Long = System.currentTimeMillis()
 )
 
-enum class ProviderId { OLLAMA, OPENAI, ANTHROPIC, GOOGLE, CUSTOM }
+enum class ProviderId { OLLAMA, OPENAI, ANTHROPIC, GOOGLE, CUSTOM, LOCAL }
 
 data class ModelInfo(
     val id: String,

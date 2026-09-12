@@ -299,6 +299,13 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                     }
                 }
             }
+            // ------------------------------------------------------------
+            item {
+                McpSettingsSection()
+            }
+            item {
+                SkillsSection()
+            }
         }
     }
 }
@@ -493,6 +500,8 @@ private fun endpointOf(settings: AppSettings, provider: ProviderId): String = wh
     ProviderId.ANTHROPIC -> settings.anthropicEndpoint
     ProviderId.GOOGLE -> settings.googleEndpoint
     ProviderId.CUSTOM -> settings.customEndpoint
+    // LOCAL tidak pakai endpoint — tampilkan path model GGUF aktif.
+    ProviderId.LOCAL -> settings.localModelPath
 }
 
 private fun copyEndpoint(settings: AppSettings, provider: ProviderId, value: String): AppSettings =
@@ -502,4 +511,6 @@ private fun copyEndpoint(settings: AppSettings, provider: ProviderId, value: Str
         ProviderId.ANTHROPIC -> settings.copy(anthropicEndpoint = value)
         ProviderId.GOOGLE -> settings.copy(googleEndpoint = value)
         ProviderId.CUSTOM -> settings.copy(customEndpoint = value)
+        // LOCAL: edit manual path GGUF (alternatif tombol "Use" di screen Models).
+        ProviderId.LOCAL -> settings.copy(localModelPath = value)
     }

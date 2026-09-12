@@ -18,9 +18,21 @@
 - Auto-scroll pintar, typing indicator, status jaringan & model
 
 ### AI Provider
+- **On-device (tanpa aplikasi lain!)**: llama.cpp embedded via JNI — model GGUF (Qwen, Llama 3.2, Gemma, Phi) diunduh langsung dari dalam aplikasi (layar **Models**) dan inferensi berjalan 100% di perangkat, streaming, auto context-reset, cek RAM sebelum load
 - **Local**: Ollama (`http://127.0.0.1:11434`) & **Remote Ollama** (mis. `http://192.168.1.100:11434`)
 - **Cloud**: OpenAI, Anthropic (Claude), Google (Gemini), Custom OpenAI-compatible
 - Deteksi model otomatis, connection status, model selector dari chat
+
+### MCP (Model Context Protocol)
+- Client MCP lengkap: transport **streamable HTTP** + **SSE legacy** + **stdio**
+- Tambah server MCP apa pun dari **Settings → MCP servers** (URL / command), test koneksi, status health + jumlah tools
+- Tools MCP otomatis tersedia ke agent sebagai `mcp_<server>_<tool>` dan tampil sebagai aktivitas manusiawi di chat
+
+### Skills
+- 6 skill bawaan (React SPA, FastAPI, conventional commits, code review, Android Gradle fixer, explainer)
+- Skill cocok dipilih otomatis berdasarkan isi tugas lalu disuntikkan ke system prompt agent
+- Buat skill sendiri dari **Settings → Skills** (nama, deskripsi, trigger, instruksi)
+- Plugin = kombinasi server MCP (tools) + skill (instruksi) + provider kustom (AI)
 
 ### Agent Engine
 - Arsitektur modular: `GUI → AgentOrchestrator → Engine`
@@ -89,6 +101,14 @@ com.openchai.app.ui/       chat, projects, settings, terminal, theme, navigation
 - Terminal menjalankan shell Android (`/system/bin/sh`, fallback bash bila ada). Utilitas Unix (`ls`, `cp`, `grep`, `find`, `tar`, ...) tersedia via toybox.
 - `node`, `python3`, `git`, dll. **tidak dibundel** dalam APK demi ukuran & lisensi. Aplikasi mendeteksi tool di `PATH` dan mendukung **PATH tambahan** di Settings → Runtime (mis. `/data/data/com.termux/files/usr/bin` untuk integrasi Termux), atau gunakan **Remote Ollama** + cloud provider bila perangkat terbatas.
 - APK release di CI ditandatangani debug key agar mudah dipasang; gunakan keystore sendiri untuk distribusi publik.
+
+## AI lokal on-device (llama.cpp)
+
+Open Chat AI men-embed [llama.cpp](https://github.com/ggml-org/llama.cpp) (pin tag `b10919`, submodule `app/src/main/cpp/llama.cpp`) via JNI/NDK — ABI `arm64-v8a` + `x86_64`. Tidak perlu aplikasi lain (Ollama pun tidak): buka **Models** → unduh GGUF → **Use** → pilih provider **On-device** di model selector.
+
+- Rekomendasi: RAM <3GB → model 0.5B; 3–4GB → 1B; 4–8GB → 1.5–2B; >8GB → 3B
+- KV cache direset otomatis tiap generasi; BOS (`add_special`) hanya pada prompt pertama
+- Model tersimpan di storage privat aplikasi (`filesDir/models`)
 
 ## Attribution & Lisensi
 

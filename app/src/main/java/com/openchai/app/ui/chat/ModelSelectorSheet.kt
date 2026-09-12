@@ -40,6 +40,7 @@ private data class ProviderRow(
 )
 
 private val PROVIDER_ORDER = listOf(
+    ProviderRow(ProviderId.LOCAL, "On-device (llama.cpp)", "Local"),
     ProviderRow(ProviderId.OLLAMA, "Ollama", "Local"),
     ProviderRow(ProviderId.OPENAI, "OpenAI", "Cloud"),
     ProviderRow(ProviderId.ANTHROPIC, "Claude", "Cloud"),

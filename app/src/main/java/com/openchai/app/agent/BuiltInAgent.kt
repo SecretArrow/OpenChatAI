@@ -10,6 +10,10 @@ import com.openchai.core.agent.AgentEvent
 import com.openchai.core.agent.AgentRequest
 import com.openchai.core.agent.CommandRunner
 import com.openchai.core.data.SecureStore
+import com.openchai.core.mcp.AgentMcpBridge
+import com.openchai.core.mcp.McpManager
+import com.openchai.core.skills.SkillInjector
+import com.openchai.core.skills.SkillLoader
 import com.openchai.core.model.AgentStep
 import com.openchai.core.model.ChatMessage
 import com.openchai.core.model.Role
@@ -38,7 +42,11 @@ class BuiltInAgent(
     private val settings: SettingsRepository,
     private val secure: SecureStore,
     private val runner: CommandRunner,
-    private val registry: ProviderRegistry
+    private val registry: ProviderRegistry,
+    /** Server MCP aktif — tools eksternal di-expose ke model lewat prefix "mcp_". */
+    private val mcp: McpManager,
+    /** Skill loader — instruksi pak skill disuntikkan ke system prompt sesuai tugas. */
+    private val skills: SkillLoader
 ) : AgentEngine {
 
     override val engineName: String = "Built-in agent"
@@ -75,7 +83,7 @@ class BuiltInAgent(
                 )
             )
 
-            val systemPrompt = buildSystemPrompt(workspaceContext)
+            val systemPrompt = buildSystemPrompt(workspaceContext, task)
             val chatTail = mutableListOf<Pair<String, String>>()
             var lastAnswer = ""
 
@@ -138,7 +146,7 @@ class BuiltInAgent(
     // Prompt & messages
     // ------------------------------------------------------------------
 
-    private fun buildSystemPrompt(workspaceContext: String): String = buildString {
+    private suspend fun buildSystemPrompt(workspaceContext: String, task: String): String = buildString {
         appendLine("You are Open Chat AI, a precise and pragmatic coding agent running inside an Android app.")
         appendLine("Complete the user's task inside the workspace, using the tools below when needed.")
         if (workspaceContext.isNotBlank()) {
@@ -160,6 +168,20 @@ class BuiltInAgent(
         appendLine("""- After each tool block you receive a user message starting with "TOOL_RESULT" containing the output.""")
         appendLine("- Work step by step until the task is fully done, then reply with the final answer WITHOUT any tool block.")
         appendLine("Final answer style: concise markdown, fenced code blocks with language tags, no filler.")
+
+        // Tools MCP eksternal (bila ada server aktif) — dipanggil dengan nama mcp_<server>_<tool>.
+        val mcpBlock = AgentMcpBridge.toolsPromptBlock(mcp)
+        if (mcpBlock.isNotBlank()) {
+            appendLine()
+            appendLine(mcpBlock.trimEnd())
+        }
+
+        // Skill aktif yang cocok dengan tugas ini (maks 3, instruksi terpotong 1200 char).
+        val skillBlock = SkillInjector.promptBlock(skills, task)
+        if (skillBlock.isNotBlank()) {
+            appendLine()
+            appendLine(skillBlock.trimEnd())
+        }
     }
 
     private fun buildMessages(
@@ -250,7 +272,11 @@ class BuiltInAgent(
                         "exit=${res.exitCode}\n$output"
                     }
                 }
-                else -> "ERROR: Unknown tool '$name'"
+                else -> {
+                    // Tool MCP eksternal (mcp_<server>_<tool>); null berarti memang bukan MCP.
+                    AgentMcpBridge.execute(mcp, name, args)
+                        ?: "ERROR: Unknown tool '$name'"
+                }
             }
         } catch (e: Exception) {
             "ERROR: ${e.message ?: "tool '$name' failed"}"
@@ -271,6 +297,7 @@ class BuiltInAgent(
         "delete_file" -> "Deleting ${labelPath(args, "path")}"
         "search" -> "Searching '${args.jsonStr("query")?.trim()?.take(40).orEmpty()}'"
         "run_command" -> "Running: ${args.jsonStr("command")?.trim()?.take(60).orEmpty()}"
+        name.startsWith("mcp_") -> "Calling ${name.removePrefix("mcp_").replace('_', ' ').trim()}"
         else -> "Using tool $name"
     }
 

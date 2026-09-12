@@ -1,0 +1,56 @@
+[
+  {
+    "id": "builtin-react-spa",
+    "name": "React SPA Builder",
+    "description": "Membangun SPA React modern dengan Vite: komponen fungsional, hooks, fetch pattern, dan aksesibilitas. Build modern React SPAs with Vite: functional components, hooks, fetch patterns, and accessibility.",
+    "instructions": "Build modern React SPAs. Scaffold with Vite (npm create vite@latest -- --template react-ts), never with CRA. Use functional components + hooks only; colocate state near usage, lift state only when two siblings need it, and reach for Context just for cross-tree data. Data fetching: a custom hook (e.g. useFetch) that owns loading and error state, aborts with AbortController on unmount, checks res.ok, and surfaces a readable error message plus a retry button. Structure: src/components, src/pages, src/hooks, src/lib. Styling: CSS grid/flex, mobile-first, design tokens as CSS variables. Accessibility: semantic HTML (nav, main, section), every input labeled, visible focus rings, alt text, full keyboard navigation. Keep dependencies minimal; add a library only when it clearly pays off. Always run npm run build before delivering.",
+    "enabled": true,
+    "builtin": true,
+    "triggers": ["react", "spa", "frontend", "web app", "component"]
+  },
+  {
+    "id": "builtin-fastapi",
+    "name": "FastAPI Backend",
+    "description": "Menyusun backend FastAPI: Pydantic, router per resource, dependency injection, dan testing pytest. Structure a FastAPI backend: Pydantic, per-resource routers, dependency injection, and pytest testing.",
+    "instructions": "Structure FastAPI projects as: app/main.py (app + include_router), app/routers/<resource>.py, app/schemas/<resource>.py (Pydantic), app/models/ (ORM, optional), app/dependencies.py. Model every request and response with Pydantic v2 schemas and set response_model on each route. One APIRouter per resource with prefix and tags; use Depends() for DB sessions, auth, and pagination so logic stays reusable. Raise HTTPException with clear detail for expected errors; add a global exception handler for the unexpected. Optional persistence: async SQLAlchemy with create_async_engine, one session per request injected via dependency. Testing: pytest with httpx AsyncClient against the app, one test module per resource, covering the happy path and the error path. Run locally with uvicorn app.main:app --reload and document endpoints via OpenAPI tags and examples.",
+    "enabled": true,
+    "builtin": true,
+    "triggers": ["fastapi", "python api", "backend", "endpoint"]
+  },
+  {
+    "id": "builtin-commit-writer",
+    "name": "Conventional Commits",
+    "description": "Menulis pesan commit conventional commits yang rapi dan informatif. Write clean, informative Conventional Commits messages.",
+    "instructions": "Write Conventional Commits: <type>(<scope>): <subject>. Types: feat, fix, refactor, docs, test, chore, perf, build, ci. Subject: imperative mood (add, not added), max 72 characters, no trailing period. After a blank line, the body explains WHY the change matters plus context a reviewer needs, wrapped around 100 characters. Mark breaking changes with ! before the colon or a BREAKING CHANGE: footer describing impact and migration. Examples: feat(auth): add refresh token rotation to cut re-logins. fix(ui): clamp chat bubble width on narrow screens. chore: bump AGP to 8.5 to fix the CI build. When asked for a message, inspect the actual diff first, pick the narrowest fitting type, and propose subject + body; never invent changes that are not in the diff.",
+    "enabled": true,
+    "builtin": true,
+    "triggers": ["commit", "git message"]
+  },
+  {
+    "id": "builtin-code-review",
+    "name": "Code Reviewer",
+    "description": "Meninjau kode dengan checklist prioritas High/Med/Low dan saran perbaikan konkret. Review code with a High/Med/Low priority checklist and concrete fixes.",
+    "instructions": "Act as a strict, pragmatic code reviewer. Checklist: (1) boundary bugs: off-by-one, empty or null input, integer overflow, race conditions; (2) error handling: unhandled exceptions, swallowed errors, missing cleanup; (3) naming: names match intent; (4) duplication: extract repeated logic; (5) complexity: split deeply nested or very long functions; (6) security: injection, unescaped output, hardcoded secrets, unsafe deserialization, missing auth checks; (7) performance: N+1 queries, accidental O(n^2), unbounded lists; (8) tests: critical and error paths covered. Output findings grouped by priority: HIGH for bugs, data loss, and security; MEDIUM for robustness and performance; LOW for style and naming. Each finding gives file:line, a one-sentence problem, and a concrete fix with a short snippet when useful. Close with a one-line verdict.",
+    "enabled": true,
+    "builtin": true,
+    "triggers": ["review", "audit", "check code"]
+  },
+  {
+    "id": "builtin-android-gradle",
+    "name": "Android Gradle Fixer",
+    "description": "Mendiagnosis dan memperbaiki error build Gradle/Kotlin Android. Diagnose and fix Android Gradle/Kotlin build errors.",
+    "instructions": "Diagnose Android Gradle/Kotlin failures methodically: read the first Caused by: line of the Gradle stack trace, it names the real problem. Common fixes: (1) compileSdk/targetSdk beyond what AGP supports, upgrade the Android Gradle Plugin or lower the SDK; (2) Kotlin vs Compose Compiler mismatch, align the Kotlin and compose plugin versions; (3) duplicate class or META-INF conflict, add packaging { resources.excludes } or exclude the transitive dependency; (4) Unresolved reference: viewBinding, enable buildFeatures { viewBinding = true }; (5) Manifest merge failure, open the merge report under app/build/outputs/logs and add tools:replace or tools:node remove; (6) dependency conflict, inspect ./gradlew app:dependencies and pin versions with constraints. For runtime crashes, read the first FATAL EXCEPTION block in adb logcat. Change one thing at a time, then rebuild.",
+    "enabled": true,
+    "builtin": true,
+    "triggers": ["gradle", "android build", "apk", "kotlin build"]
+  },
+  {
+    "id": "builtin-explainer",
+    "name": "Simple Explainer",
+    "description": "Menjelaskan konsep bertingkat: analogi sederhana, detail teknis, lalu contoh kode. Explain concepts in layers: simple analogy, technical detail, then a code example.",
+    "instructions": "Explain in layers so any audience can follow. Layer 1, analogy: one or two plain sentences comparing the idea to something everyday (a post office, a kitchen, a toolbox). Layer 2, technical detail: the real mechanism step by step, naming the key parts; define every piece of jargon the first time it appears and never use a word you have not defined. Layer 3, concrete example: a short code snippet, a worked calculation, or a realistic scenario that makes it tangible. Keep the layers clearly separated with short paragraphs or bullets, and match depth to the question: simple questions deserve short answers, deep questions deserve the full stack. Prefer concrete over abstract. End by inviting a follow-up question about whichever layer was least clear.",
+    "enabled": true,
+    "builtin": true,
+    "triggers": ["explain", "jelaskan", "what is", "apa itu"]
+  }
+]
