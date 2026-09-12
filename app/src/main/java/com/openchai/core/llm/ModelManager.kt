@@ -2,6 +2,8 @@ package com.openchai.core.llm
 
 import android.app.ActivityManager
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +18,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -52,7 +55,8 @@ private val DownloadHttp: OkHttpClient = OkHttpClient.Builder()
  *  - katalog dibaca dari assets "models.json" (kotlinx.serialization),
  *  - unduhan streaming OkHttp ke "<id>.part" lalu di-rename "<id>.gguf",
  *  - progress dipublikasikan lewat [downloadStates] (StateFlow per model id),
- *  - cancel via [cancelDownload] (flag AtomicBoolean + call.cancel()).
+ *  - cancel via [cancelDownload] (flag AtomicBoolean + call.cancel()),
+ *  - impor/ekspor file GGUF via SAF (importModel/exportModel) → [transferState].
  */
 class ModelManager(private val context: Context, private val scope: CoroutineScope) {
 
@@ -79,6 +83,12 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
         val error: String? = null
     )
 
+    /** Fase transfer file model (impor/ekspor). */
+    enum class TransferPhase { RUNNING, DONE, FAILED }
+
+    /** Snapshot status transfer impor/ekspor (null = idle, tidak ada transfer berjalan). */
+    data class TransferState(val phase: TransferPhase, val message: String? = null)
+
     val dir: File = File(context.filesDir, "models")
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -86,6 +96,9 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
 
     private val _downloadStates = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
     val downloadStates: StateFlow<Map<String, DownloadState>> = _downloadStates.asStateFlow()
+
+    private val _transferState = MutableStateFlow<TransferState?>(null)
+    val transferState: StateFlow<TransferState?> = _transferState.asStateFlow()
 
     private val jobs = ConcurrentHashMap<String, Job>()
     private val cancelFlags = ConcurrentHashMap<String, AtomicBoolean>()
@@ -228,6 +241,146 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
     }
 
     // ----------------------------------------------------------------------
+    // Impor / Ekspor (SAF)
+    // ----------------------------------------------------------------------
+
+    /** Reset status transfer ke idle (dipanggil UI setelah snackbar ditampilkan). */
+    fun clearTransferState() {
+        _transferState.value = null
+    }
+
+    /**
+     * Impor file GGUF dari [uri] (SAF OpenDocument) ke direktori model:
+     *  - validasi magic bytes "GGUF" (pushback, tanpa reopen stream),
+     *  - nama file asli disanitasi menjadi id model (tabrakan → "-2", "-3", …),
+     *  - cek ruang kosong ~1.2× ukuran sumber, copy streaming ke "<id>.part",
+     *  - rename final ke "<id>.gguf" (pola sama dengan doDownload).
+     */
+    suspend fun importModel(uri: Uri): Result<File> = withContext(Dispatchers.IO) {
+        setTransferState(TransferState(TransferPhase.RUNNING, "Importing model…"))
+        var part: File? = null
+        try {
+            dir.mkdirs()
+            val resolver = context.contentResolver
+            val input = resolver.openInputStream(uri)
+                ?: throw IOException("Cannot open selected file")
+            input.use { stream ->
+                // Validasi magic bytes "GGUF": baca 4 byte pertama, lalu lanjutkan
+                // copy dari byte ke-4 pada stream yang sama (pushback — jangan reopen).
+                val magic = ByteArray(4)
+                var magicRead = 0
+                while (magicRead < magic.size) {
+                    val n = stream.read(magic, magicRead, magic.size - magicRead)
+                    if (n < 0) break
+                    magicRead += n
+                }
+                if (magicRead < magic.size || !magic.contentEquals(GGUF_MAGIC)) {
+                    setTransferState(TransferState(TransferPhase.FAILED, "Not a valid GGUF file"))
+                    val failure: Result<File> =
+                        Result.failure(IllegalStateException("Not a valid GGUF file"))
+                    return@withContext failure
+                }
+
+                // Nama file asli (bila provider menyediakan) → id model tersanitasi.
+                val info = queryFileInfo(uri)
+                val id = sanitizeImportName(info?.first)
+
+                // Hindari tabrakan id model yang sudah ada: "-2", "-3", …
+                var unique = id
+                var suffix = 2
+                while (downloadedFile(unique).exists()) {
+                    unique = "$id-$suffix"
+                    suffix++
+                }
+
+                // Cek ruang kosong: butuh ~1.2× ukuran sumber (bila diketahui).
+                val sourceSize = info?.second ?: 0L
+                if (sourceSize > 0L) {
+                    val required = (sourceSize * 12L) / 10L
+                    if (dir.usableSpace < required) {
+                        throw IOException(
+                            "Not enough free space — ${humanBytes(required)} needed, " +
+                                "${humanBytes(dir.usableSpace)} available"
+                        )
+                    }
+                }
+
+                // Copy streaming (buffer 64KB) ke "<id>.part".
+                val staging = partFile(unique)
+                part = staging
+                staging.outputStream().use { output ->
+                    // Pushback: 4 byte magic yang sudah dibaca ditulis lebih dulu.
+                    output.write(magic, 0, magicRead)
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    while (true) {
+                        val read = stream.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                    }
+                    output.flush()
+                }
+
+                // Finalisasi: rename "<id>.part" → "<id>.gguf" (hapus target lama dulu).
+                val target = downloadedFile(unique)
+                if (target.exists()) target.delete()
+                if (!staging.renameTo(target)) {
+                    throw IOException("Failed to finalize import of $unique")
+                }
+                part = null
+
+                setTransferState(
+                    TransferState(
+                        TransferPhase.DONE,
+                        "Imported $unique (${humanBytes(target.length())})"
+                    )
+                )
+                Result.success(target)
+            }
+        } catch (ce: CancellationException) {
+            part?.delete()
+            setTransferState(null) // Dibatalkan (scope mati) → kembali idle, bukan gagal.
+            throw ce
+        } catch (e: Exception) {
+            part?.delete()
+            setTransferState(TransferState(TransferPhase.FAILED, e.message ?: "Import failed"))
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Ekspor model [id] ke [uri] tujuan (SAF CreateDocument, mode "wt" = truncate).
+     * Copy streaming 64KB dari file sumber ke output stream penyedia dokumen.
+     */
+    suspend fun exportModel(id: String, target: Uri): Result<Unit> = withContext(Dispatchers.IO) {
+        setTransferState(TransferState(TransferPhase.RUNNING, "Exporting $id.gguf…"))
+        try {
+            val source = downloadedFile(id)
+            if (!source.isFile) throw IOException("Model not found: $id")
+            val output = context.contentResolver.openOutputStream(target, "wt")
+                ?: throw IOException("Cannot open destination")
+            output.use { out ->
+                FileInputStream(source).use { input ->
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        out.write(buffer, 0, read)
+                    }
+                    out.flush()
+                }
+            }
+            setTransferState(TransferState(TransferPhase.DONE, "Exported to selected location"))
+            Result.success(Unit)
+        } catch (ce: CancellationException) {
+            setTransferState(null) // Dibatalkan (scope mati) → kembali idle, bukan gagal.
+            throw ce
+        } catch (e: Exception) {
+            setTransferState(TransferState(TransferPhase.FAILED, e.message ?: "Export failed"))
+            Result.failure(e)
+        }
+    }
+
+    // ----------------------------------------------------------------------
     // Model terpasang
     // ----------------------------------------------------------------------
 
@@ -289,6 +442,39 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
         _downloadStates.value = _downloadStates.value + (id to state)
     }
 
+    private fun setTransferState(state: TransferState?) {
+        _transferState.value = state
+    }
+
+    /** DISPLAY_NAME + SIZE file SAF (null bila query gagal / kolom tidak tersedia). */
+    private fun queryFileInfo(uri: Uri): Pair<String?, Long?>? = runCatching {
+        context.contentResolver.query(
+            uri,
+            arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val nameIdx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIdx = cursor.getColumnIndex(OpenableColumns.SIZE)
+            val name = if (nameIdx >= 0) cursor.getString(nameIdx) else null
+            val size = if (sizeIdx >= 0 && !cursor.isNull(sizeIdx)) cursor.getLong(sizeIdx) else null
+            name to size
+        }
+    }.getOrNull()
+
+    /**
+     * Sanitasi nama file hasil impor menjadi id model: tanpa path, tanpa suffix
+     * ".gguf", hanya [A-Za-z0-9._-]; hasil kosong → "imported-model".
+     */
+    private fun sanitizeImportName(raw: String?): String {
+        var name = (raw ?: "").substringAfterLast('/').substringAfterLast('\\')
+        if (name.endsWith(".gguf", ignoreCase = true)) name = name.dropLast(5)
+        name = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        return name.ifBlank { "imported-model" }
+    }
+
     private fun partFile(id: String) = File(dir, "$id.part")
 
     private fun downloadedFile(id: String) = File(dir, "$id.gguf")
@@ -301,5 +487,8 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
         const val CATALOG_ASSET = "models.json"
         const val BUFFER_SIZE = 64 * 1024
         const val PROGRESS_INTERVAL_MS = 200L
+
+        /** Magic bytes "GGUF" (0x47 0x47 0x55 0x46) untuk validasi file impor. */
+        val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)
     }
 }

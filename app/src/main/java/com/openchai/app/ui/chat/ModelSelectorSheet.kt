@@ -8,12 +8,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -86,7 +92,11 @@ fun ModelSelectorSheet(
                             .fillMaxWidth()
                             .clickable {
                                 expanded = if (expanded == row.id) null else row.id
-                                if (models[row.id] == null) vm.refreshProvider(row.id)
+                                // Refetch bila list kosong/belum ada — provider yang
+                                // gagal sebelumnya dicoba ulang tiap kali dibuka.
+                                if ((models[row.id] ?: emptyList()).isEmpty()) {
+                                    vm.refreshProvider(row.id)
+                                }
                             }
                             .padding(vertical = 10.dp)
                     ) {
@@ -95,11 +105,32 @@ fun ModelSelectorSheet(
                             Spacer(Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(row.name, style = MaterialTheme.typography.titleMedium)
+                                // Pesan status asli dari provider; bila list yang tampil
+                                // adalah cache lama, tandai dengan suffix " · cached".
+                                val rawMessage = status?.message ?: "Not checked"
+                                val statusMessage =
+                                    if (status?.stale == true) "$rawMessage · cached" else rawMessage
                                 Text(
-                                    "${row.kind} · ${status?.message ?: "Not checked"}",
+                                    "${row.kind} · $statusMessage",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+                            // Spinner saat mengecek; selain itu tombol refresh manual
+                            // per-provider (fetch ulang list model dari base URL).
+                            if (status?.connected == null) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                IconButton(onClick = { vm.refreshProvider(row.id) }) {
+                                    Icon(
+                                        Icons.Filled.Refresh,
+                                        contentDescription = "Refresh",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                             if (settings.activeProvider == row.id) {
                                 Text("●", color = MaterialTheme.colorScheme.primary)
@@ -108,13 +139,28 @@ fun ModelSelectorSheet(
                         if (expanded == row.id) {
                             Spacer(Modifier.height(6.dp))
                             if (providerModels.isEmpty()) {
-                                Text(
-                                    if (status?.connected == true) "No models found"
-                                    else "Unavailable — check endpoint/API key in Settings",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 18.dp)
-                                )
+                                // Empty-state informatif: pesan status ASLI dari provider
+                                // (bukan generik) + hint retry bila gagal / belum dicek.
+                                Column(modifier = Modifier.padding(start = 18.dp)) {
+                                    Text(
+                                        status?.message ?: "Not checked yet",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    if (status?.connected == false) {
+                                        Text(
+                                            "Tap ↻ to retry",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    } else if (status == null) {
+                                        Text(
+                                            "Tap ↻ to load models",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             } else {
                                 providerModels.forEach { model: ModelInfo ->
                                     Row(

@@ -25,8 +25,8 @@ import java.io.IOException
 
 /**
  * Provider Anthropic (Claude) via Messages API.
- * - listModels : GET /v1/models → data[].id
- * - test       : GET /v1/models (2xx)
+ * - listModels : GET /v1/models → data[].id + display_name (bila base ber-/v1 → /models)
+ * - test       : kandidat /models yang sama, sehat bila ada yang 2xx
  * - streamChat : POST /v1/messages, SSE:
  *     "content_block_delta" → delta.text → Delta,
  *     "message_stop" → selesai, type "error" → Error.
@@ -60,29 +60,62 @@ class AnthropicProvider(
 
     override fun isConfigured(): Boolean = !cachedKey.isNullOrBlank()
 
+    /**
+     * Kandidat URL /models: "$base/v1/models" selalu dicoba lebih dulu; bila base
+     * sudah berakhiran "/v1" (user mengisi endpoint termasuk /v1) tambahkan
+     * "$base/models" agar tidak jatuh ke "/v1/v1/models" yang salah.
+     */
+    private fun modelCandidates(base: String): List<String> {
+        val candidates = mutableListOf("$base/v1/models")
+        if (base.endsWith("/v1")) candidates.add("$base/models")
+        return candidates
+    }
+
+    /**
+     * Ambil body /models dari kandidat pertama yang menjawab 2xx (header
+     * x-api-key + anthropic-version tetap). 404/401/403 → lanjut kandidat
+     * berikutnya; error jaringan (IOException) langsung dilempar. Semua kandidat
+     * gagal HTTP → IOException informatif supaya pesannya tampil di Model Selector.
+     */
+    private fun fetchModelsBody(base: String, key: String): String {
+        var lastCode = 0
+        var lastSnippet = ""
+        for (url in modelCandidates(base)) {
+            val req = headers(Request.Builder().url(url).get(), key).build()
+            val resp = try {
+                AiHttp.newCall(req).execute()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (io: IOException) {
+                throw io
+            }
+            resp.use {
+                if (it.isSuccessful) return it.body?.string().orEmpty()
+                lastCode = it.code
+                lastSnippet = errorSnippet(try { it.body?.string() } catch (_: Exception) { null })
+            }
+        }
+        throw IOException("Anthropic HTTP $lastCode$lastSnippet")
+    }
+
     override suspend fun listModels(): List<ModelInfo> {
         val base = baseUrl()
         val key = apiKey()
         if (base.isBlank() || key.isBlank()) return emptyList()
-        val req = headers(Request.Builder().url("$base/v1/models").get(), key).build()
-        AiHttp.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                throw IOException("Anthropic HTTP ${resp.code}${errorSnippet(resp.body?.string())}")
-            }
-            val root = parseJsonSafe(resp.body?.string().orEmpty()) ?: return emptyList()
-            val data = root.jsonArr("data") ?: return emptyList()
-            return data.mapNotNull { el ->
-                val m = el as? JsonObject ?: return@mapNotNull null
-                val id = m.jsonStr("id") ?: return@mapNotNull null
-                ModelInfo(
-                    id = id,
-                    name = m.jsonStr("display_name") ?: id,
-                    providerId = ProviderId.ANTHROPIC,
-                    providerName = displayName,
-                    isLocal = false
-                )
-            }.sortedBy { it.id }
-        }
+        val body = fetchModelsBody(base, key)
+        val root = parseJsonSafe(body) ?: return emptyList()
+        val data = root.jsonArr("data") ?: return emptyList()
+        return data.mapNotNull { el ->
+            val m = el as? JsonObject ?: return@mapNotNull null
+            val id = m.jsonStr("id") ?: return@mapNotNull null
+            ModelInfo(
+                id = id,
+                name = m.jsonStr("display_name") ?: id,
+                providerId = ProviderId.ANTHROPIC,
+                providerName = displayName,
+                isLocal = false
+            )
+        }.sortedBy { it.id }
     }
 
     override suspend fun testConnection(): Boolean {
@@ -90,8 +123,19 @@ class AnthropicProvider(
         val key = apiKey()
         if (base.isBlank() || key.isBlank()) return false
         return try {
-            val req = headers(Request.Builder().url("$base/v1/models").get(), key).build()
-            AiHttp.newCall(req).execute().use { it.isSuccessful }
+            for (url in modelCandidates(base)) {
+                val req = headers(Request.Builder().url(url).get(), key).build()
+                val resp = try {
+                    AiHttp.newCall(req).execute()
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (_: IOException) {
+                    // Error jaringan → tidak sehat, jangan coba kandidat lain.
+                    return false
+                }
+                resp.use { if (it.isSuccessful) return true }
+            }
+            false
         } catch (ce: CancellationException) {
             throw ce
         } catch (_: Exception) {

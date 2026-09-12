@@ -1,6 +1,7 @@
 package com.openchai.app.ui.models
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.openchai.app.OpenChatApp
@@ -16,8 +17,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * ViewModel screen Models: katalog GGUF (unduh/cancel), model terpasang
- * (Use/Delete), dan rekomendasi berdasarkan RAM perangkat.
+ * ViewModel screen Models: katalog GGUF (unduh/cancel), impor/ekspor file GGUF,
+ * model terpasang (Use/Delete), dan rekomendasi berdasarkan RAM perangkat.
  */
 class ModelsViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -29,6 +30,9 @@ class ModelsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Status unduhan per model id (dibagikan dari [ModelManager]). */
     val downloadStates: StateFlow<Map<String, ModelManager.DownloadState>> = manager.downloadStates
+
+    /** Status transfer impor/ekspor (null = idle; dibagikan dari [ModelManager]). */
+    val transferState: StateFlow<ModelManager.TransferState?> = manager.transferState
 
     private val _catalog = MutableStateFlow<List<ModelManager.CatalogModel>>(emptyList())
     val catalog: StateFlow<List<ModelManager.CatalogModel>> = _catalog.asStateFlow()
@@ -61,6 +65,27 @@ class ModelsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun cancelDownload(id: String) {
         manager.cancelDownload(id)
+    }
+
+    /** Impor model GGUF dari SAF uri; daftar terpasang di-refresh saat sukses. */
+    fun importModel(uri: Uri) {
+        viewModelScope.launch {
+            manager.importModel(uri).onSuccess {
+                _installed.value = manager.installedModels()
+            }
+        }
+    }
+
+    /** Ekspor model [id] ke SAF uri tujuan (SAF CreateDocument). */
+    fun exportModel(id: String, uri: Uri) {
+        viewModelScope.launch {
+            manager.exportModel(id, uri)
+        }
+    }
+
+    /** Reset status transfer (dipanggil UI setelah snackbar ditampilkan). */
+    fun clearTransfer() {
+        manager.clearTransferState()
     }
 
     /** Hapus model terpasang; bila model aktif ikut terhapus, kosongkan pilihan lokal. */

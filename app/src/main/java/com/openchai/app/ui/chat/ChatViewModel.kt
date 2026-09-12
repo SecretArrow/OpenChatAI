@@ -16,16 +16,27 @@ import com.openchai.core.model.Project
 import com.openchai.core.model.ProviderId
 import com.openchai.core.model.Role
 import com.openchai.core.settings.AppSettings
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import java.io.IOException
 
-/** Status koneksi satu provider untuk Model Selector. */
+/**
+ * Status koneksi satu provider untuk Model Selector.
+ * - connected: null = sedang mengecek, true/false = hasil cek terakhir.
+ * - stale: true bila daftar model yang ditampilkan adalah cache list lama
+ *   (fetch terakhir gagal) — UI menandai pesan dengan suffix " · cached".
+ * Konstruktor posisional lama (connected, message) tetap compile (stale default).
+ */
 data class ProviderStatus(
     val connected: Boolean?,
-    val message: String?
+    val message: String,
+    val stale: Boolean = false
 )
 
 /** Status engine agent untuk error state di chat. */
@@ -281,25 +292,52 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshProvider(providerId: ProviderId) {
         viewModelScope.launch {
             val provider = container.providerRegistry.get(providerId) ?: return@launch
-            _providerStatus.value = _providerStatus.value + (providerId to ProviderStatus(null, "Checking…"))
-            val connected = try {
-                provider.testConnection()
-            } catch (_: Exception) {
-                false
+            val hadOldList = _models.value[providerId].orEmpty().isNotEmpty()
+            // 1) Status "Checking…" — list lama di _models DIPERTAHANKAN (tidak di-wipe)
+            //    supaya UI masih menampilkan daftar cache selama pengecekan.
+            _providerStatus.value = _providerStatus.value +
+                (providerId to ProviderStatus(null, "Checking…", stale = hadOldList))
+            // 2) SELALU fetch listModels (tidak lagi gated testConnection) — endpoint
+            //    yang health-check-nya gagal tapi /models-nya jalan tetap tampil listnya.
+            //    Blokir I/O jaringan dijalankan di Dispatchers.IO (bukan Main).
+            var fetched: List<ModelInfo>? = null
+            var failure: Exception? = null
+            try {
+                fetched = withContext(Dispatchers.IO) { provider.listModels() }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                failure = e
             }
-            val list = if (connected) {
-                try {
-                    provider.listModels()
-                } catch (_: Exception) {
-                    emptyList()
-                }
+            if (fetched != null) {
+                _models.value = _models.value + (providerId to fetched)
+                _providerStatus.value = _providerStatus.value + (providerId to ProviderStatus(
+                    true,
+                    if (fetched.isEmpty()) "Connected · no models" else "Connected · ${fetched.size} models",
+                    stale = false
+                ))
             } else {
-                emptyList()
+                // 3) Gagal: list lama TETAP ada di _models (UI menandai " · cached"),
+                //    status menampilkan pesan error ringkas — bukan sekadar "Unavailable".
+                _providerStatus.value = _providerStatus.value + (providerId to ProviderStatus(
+                    false,
+                    providerErrorMessage(failure),
+                    stale = hadOldList
+                ))
             }
-            _models.value = _models.value + (providerId to list)
-            _providerStatus.value =
-                _providerStatus.value + (providerId to ProviderStatus(connected, if (connected) "Connected" else "Unavailable"))
         }
+    }
+
+    /**
+     * Pesan error ringkas untuk Model Selector: ambil e.message (sudah informatif,
+     * mis. "Anthropic HTTP 401 — …"), batasi ±120 char. IOException tanpa message
+     * → "Connection failed"; exception lain tanpa message → nama class-nya.
+     */
+    private fun providerErrorMessage(e: Exception?): String {
+        if (e == null) return "Unavailable"
+        val msg = e.message?.trim().orEmpty()
+        if (msg.isNotEmpty()) return msg.take(120)
+        return if (e is IOException) "Connection failed" else e.javaClass.simpleName
     }
 
     fun setActiveModel(providerId: ProviderId, modelId: String) {

@@ -1,32 +1,43 @@
 package com.openchai.app.ui.models
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -46,7 +57,8 @@ import java.io.File
  * Screen Models: kelola AI on-device (llama.cpp).
  *
  *  - Banner rekomendasi model sesuai RAM perangkat.
- *  - Daftar model terpasang: tombol "Use" (jadikan provider aktif) + "Delete".
+ *  - Impor file GGUF dari penyimpanan (SAF OpenDocument) + indikator transfer.
+ *  - Daftar model terpasang: tombol "Use" / "Export" (SAF CreateDocument) / "Delete".
  *  - Katalog GGUF: tombol Download dengan progress MB + Cancel / Retry.
  */
 @Composable
@@ -59,83 +71,167 @@ fun ModelsScreen(
     val installed by vm.installed.collectAsStateWithLifecycle()
     val downloads by vm.downloadStates.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
+    val transfer by vm.transferState.collectAsStateWithLifecycle()
 
     // Model yang menunggu konfirmasi hapus.
     var pendingDelete by remember { mutableStateOf<File?>(null) }
 
-    Column(
+    // Id model yang menunggu pemilihan tujuan ekspor (SAF CreateDocument).
+    var pendingExportId by remember { mutableStateOf<String?>(null) }
+
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Launcher impor: SAF OpenDocument tanpa filter MIME (file .gguf jarang
+    // terdaftar dengan MIME type resmi).
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) vm.importModel(uri) }
+
+    // Launcher ekspor: SAF CreateDocument, saran nama = nama file asli.
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        val id = pendingExportId
+        pendingExportId = null
+        if (uri != null && id != null) vm.exportModel(id, uri)
+    }
+
+    // Snackbar hasil transfer (snapshot agar konsisten selama koroutine jalan):
+    // DONE → info lalu auto reset; FAILED → error dengan aksi "Dismiss".
+    val reported = transfer
+    LaunchedEffect(reported) {
+        when (reported?.phase) {
+            ModelManager.TransferPhase.DONE -> {
+                snackbarHostState.showSnackbar(
+                    message = reported.message ?: "Transfer completed",
+                    duration = SnackbarDuration.Short
+                )
+                vm.clearTransfer()
+            }
+            ModelManager.TransferPhase.FAILED -> {
+                snackbarHostState.showSnackbar(
+                    message = reported.message ?: "Transfer failed",
+                    actionLabel = "Dismiss",
+                    duration = SnackbarDuration.Indefinite
+                )
+                // Reset status apapun cara snackbar ditutup (aksi maupun swipe).
+                vm.clearTransfer()
+            }
+            else -> Unit
+        }
+    }
+
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // ---------------- Header ----------------
-        Text(
-            "Models",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 2.dp)
-        )
-        Text(
-            "On-device AI (llama.cpp) — download a GGUF model once, chat offline after that.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp)
-        )
+        Column(modifier = Modifier.fillMaxSize()) {
+            // ---------------- Header ----------------
+            Text(
+                "Models",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 2.dp)
+            )
+            Text(
+                "On-device AI (llama.cpp) — download a GGUF model once, chat offline after that.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
 
-        RecommendationBanner(vm.recommendationText())
+            RecommendationBanner(vm.recommendationText())
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // ---------------- Terpasang ----------------
-            item { SectionTitle("INSTALLED") }
-            if (installed.isEmpty()) {
+            // Indikator transfer (impor/ekspor) sedang berjalan.
+            if (reported?.phase == ModelManager.TransferPhase.RUNNING) {
+                TransferIndicator(reported.message)
+            }
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // ---------------- Terpasang ----------------
                 item {
-                    Text(
-                        "No models installed yet — download one from the catalog below.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                item {
-                    ElevatedCard(
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-                            installed.forEachIndexed { index, file ->
-                                if (index > 0) {
-                                    HorizontalDivider(
-                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                                        modifier = Modifier.padding(vertical = 10.dp)
+                        SectionTitle("INSTALLED")
+                        Spacer(Modifier.weight(1f))
+                        FilledTonalButton(
+                            onClick = { importLauncher.launch(arrayOf("*/*")) }
+                        ) {
+                            Icon(
+                                Icons.Filled.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Import GGUF")
+                        }
+                    }
+                }
+                if (installed.isEmpty()) {
+                    item {
+                        Text(
+                            "No models installed yet — download from the catalog below or import a GGUF file.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    item {
+                        ElevatedCard(
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                                installed.forEachIndexed { index, file ->
+                                    if (index > 0) {
+                                        HorizontalDivider(
+                                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                            modifier = Modifier.padding(vertical = 10.dp)
+                                        )
+                                    }
+                                    InstalledRow(
+                                        file = file,
+                                        isActive = settings.localModelPath == file.absolutePath,
+                                        onUse = { vm.useModel(file) { onOpenChat() } },
+                                        onExport = {
+                                            // Id = nama file tanpa suffix ".gguf";
+                                            // saran nama dokumen = nama file asli.
+                                            pendingExportId = file.name.removeSuffix(".gguf")
+                                            exportLauncher.launch(file.name)
+                                        },
+                                        onDelete = { pendingDelete = file }
                                     )
                                 }
-                                InstalledRow(
-                                    file = file,
-                                    isActive = settings.localModelPath == file.absolutePath,
-                                    onUse = { vm.useModel(file) { onOpenChat() } },
-                                    onDelete = { pendingDelete = file }
-                                )
                             }
                         }
                     }
                 }
-            }
 
-            // ---------------- Katalog ----------------
-            item { SectionTitle("CATALOG") }
-            items(catalog, key = { it.id }) { model ->
-                CatalogRow(
-                    model = model,
-                    state = downloads[model.id],
-                    isInstalled = installed.any { it.name == "${model.id}.gguf" },
-                    onDownload = { vm.download(model) },
-                    onCancel = { vm.cancelDownload(model.id) }
-                )
+                // ---------------- Katalog ----------------
+                item { SectionTitle("CATALOG") }
+                items(catalog, key = { it.id }) { model ->
+                    CatalogRow(
+                        model = model,
+                        state = downloads[model.id],
+                        isInstalled = installed.any { it.name == "${model.id}.gguf" },
+                        onDownload = { vm.download(model) },
+                        onCancel = { vm.cancelDownload(model.id) }
+                    )
+                }
             }
         }
+
+        // Snackbar hasil impor/ekspor (di atas bottom area screen).
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 
     // ---------------- Konfirmasi hapus ----------------
@@ -196,12 +292,39 @@ private fun RecommendationBanner(text: String) {
     }
 }
 
-/** Baris model terpasang: nama, ukuran, badge aktif, tombol Use / Delete. */
+/** Indikator transfer (impor/ekspor) berjalan — pola visual RecommendationBanner. */
+@Composable
+private fun TransferIndicator(message: String?) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                StatusDot(MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = message ?: "Working…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+/** Baris model terpasang: nama, ukuran, badge aktif, tombol Use / Export / Delete. */
 @Composable
 private fun InstalledRow(
     file: File,
     isActive: Boolean,
     onUse: () -> Unit,
+    onExport: () -> Unit,
     onDelete: () -> Unit
 ) {
     Row(
@@ -236,6 +359,7 @@ private fun InstalledRow(
         if (!isActive) {
             TextButton(onClick = onUse) { Text("Use") }
         }
+        TextButton(onClick = onExport) { Text("Export") }
         IconButton(onClick = onDelete) {
             Icon(
                 Icons.Filled.Delete,

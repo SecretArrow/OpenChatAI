@@ -28,8 +28,8 @@ import java.io.IOException
 /**
  * Provider kompatibel OpenAI — dipakai untuk OPENAI (api.openai.com) dan CUSTOM
  * (endpoint apa pun dengan API chat-completions gaya OpenAI).
- * - listModels : GET /models → data[].id
- * - test       : GET /models (bila 404 → GET base; 2xx dianggap sehat)
+ * - listModels : GET /models → data[].id (bila 404/401/403 → coba /v1/models)
+ * - test       : kandidat /models yang sama, 2xx sehat; semua 404 → fallback GET base
  * - streamChat : POST /chat/completions, SSE, delta.content, "[DONE]" menutup stream.
  * API key dibaca dari [SecureStore] dengan kunci "OPENAI"/"CUSTOM".
  */
@@ -68,30 +68,63 @@ class OpenAiCompatProvider(
         return !cachedKey.isNullOrBlank()
     }
 
+    /**
+     * Kandidat URL /models sesuai normalisasi path endpoint: "$base/models";
+     * bila base TIDAK berakhiran "/v1" tambahkan "$base/v1/models" (endpoint user
+     * kadang sudah memuat /v1, kadang belum — coba keduanya berurutan).
+     */
+    private fun modelCandidates(base: String): List<String> {
+        val candidates = mutableListOf("$base/models")
+        if (!base.endsWith("/v1")) candidates.add("$base/v1/models")
+        return candidates
+    }
+
+    /**
+     * Ambil body /models dari kandidat pertama yang menjawab 2xx.
+     * 404/401/403 → lanjut ke kandidat berikutnya; error jaringan (IOException)
+     * langsung dilempar (tidak mencoba kandidat lain). Semua kandidat gagal HTTP
+     * → IOException informatif supaya pesannya tampil di Model Selector.
+     */
+    private fun fetchModelsBody(base: String, key: String): String {
+        var lastCode = 0
+        var lastSnippet = ""
+        for (url in modelCandidates(base)) {
+            val req = authorized(Request.Builder().url(url).get(), key).build()
+            val resp = try {
+                AiHttp.newCall(req).execute()
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (io: IOException) {
+                throw io
+            }
+            resp.use {
+                if (it.isSuccessful) return it.body?.string().orEmpty()
+                lastCode = it.code
+                lastSnippet = errorSnippet(try { it.body?.string() } catch (_: Exception) { null })
+            }
+        }
+        throw IOException("${displayName} HTTP $lastCode$lastSnippet")
+    }
+
     override suspend fun listModels(): List<ModelInfo> {
         val base = baseUrl()
         if (base.isBlank()) return emptyList()
         val key = apiKey()
-        val req = authorized(Request.Builder().url("$base/models").get(), key).build()
-        AiHttp.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                throw IOException("${displayName} HTTP ${resp.code}${errorSnippet(resp.body?.string())}")
-            }
-            val root = parseJsonSafe(resp.body?.string().orEmpty()) ?: return emptyList()
-            val data = root.jsonArr("data") ?: return emptyList()
-            return data.mapNotNull { el ->
-                val m = el as? JsonObject ?: return@mapNotNull null
-                val id = m.jsonStr("id") ?: return@mapNotNull null
-                ModelInfo(
-                    id = id,
-                    name = id,
-                    providerId = providerId,
-                    providerName = displayName,
-                    isLocal = false,
-                    details = m.jsonStr("owned_by")
-                )
-            }.sortedBy { it.id }
-        }
+        val body = fetchModelsBody(base, key)
+        val root = parseJsonSafe(body) ?: return emptyList()
+        val data = root.jsonArr("data") ?: return emptyList()
+        return data.mapNotNull { el ->
+            val m = el as? JsonObject ?: return@mapNotNull null
+            val id = m.jsonStr("id") ?: return@mapNotNull null
+            ModelInfo(
+                id = id,
+                name = id,
+                providerId = providerId,
+                providerName = displayName,
+                isLocal = false,
+                details = m.jsonStr("owned_by")
+            )
+        }.sortedBy { it.id }
     }
 
     override suspend fun testConnection(): Boolean {
@@ -99,11 +132,26 @@ class OpenAiCompatProvider(
         if (base.isBlank()) return false
         val key = apiKey()
         return try {
-            val modelsReq = authorized(Request.Builder().url("$base/models").get(), key).build()
-            val modelsResp = AiHttp.newCall(modelsReq).execute()
-            modelsResp.use { if (it.isSuccessful) return true }
-            // Endpoint custom kadang tidak punya /models — bila 404, coba root URL.
-            if (modelsResp.code == 404) {
+            var anySuccess = false
+            var allNotFound = true
+            for (url in modelCandidates(base)) {
+                val req = authorized(Request.Builder().url(url).get(), key).build()
+                val resp = try {
+                    AiHttp.newCall(req).execute()
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (_: IOException) {
+                    // Error jaringan → tidak sehat, jangan coba kandidat lain.
+                    return false
+                }
+                resp.use {
+                    if (it.isSuccessful) anySuccess = true else if (it.code != 404) allNotFound = false
+                }
+                if (anySuccess) return true
+            }
+            // Endpoint custom kadang tidak punya /models — bila SEMUA kandidat /models
+            // menjawab 404, fallback root GET seperti perilaku lama.
+            if (allNotFound) {
                 val baseReq = authorized(Request.Builder().url(base).get(), key).build()
                 AiHttp.newCall(baseReq).execute().use { it.isSuccessful }
             } else {
