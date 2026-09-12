@@ -421,7 +421,7 @@ class LinuxEnvManager(private val context: Context, val scope: CoroutineScope) {
                     // untuk diagnosa (instal ulang menghapusnya di langkah 0).
                     discardDownloadArtifacts()
                     val message = when (e) {
-                        is InstallFailure -> e.message
+                        is InstallFailure -> e.message ?: "Instalasi gagal"
                         else -> "Instalasi gagal: ${e.message ?: e.javaClass.simpleName}"
                     }
                     emitFailed(message)
@@ -671,7 +671,7 @@ class LinuxEnvManager(private val context: Context, val scope: CoroutineScope) {
 
                     // File biasa → salin isi entry (stream otomatis berhenti
                     // di akhir entry, ditutup via copy).
-                    entry.isRegularFile -> extractRegularFile(tar, target)
+                    entry.isFile -> extractRegularFile(tar, target)
 
                     // Jenis lain (fifo/perangkat) tidak ada pada ubuntu-base.
                     else -> Unit
@@ -819,8 +819,8 @@ class LinuxEnvManager(private val context: Context, val scope: CoroutineScope) {
         "LANG" to "C.UTF-8",
         "TMPDIR" to "/tmp",
         "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-        // PS1 = "\$ " (prompt bash '$'); "\\\$" menghasilkan literal backslash + $.
-        "PS1" to "\\\$ "
+        // PS1 = "${'$'} " (prompt bash '$'); "\\${'$'}" menghasilkan literal backslash + $.
+        "PS1" to "\\${'$'} "
     )
 
     /**
@@ -843,7 +843,7 @@ class LinuxEnvManager(private val context: Context, val scope: CoroutineScope) {
             return CommandResult(-1, "", "proot tidak ditemukan di ${proot.absolutePath}")
         }
         // Bungkus command: simpan exit code lalu cetak sentinel.
-        val wrapped = command + "; __oca_rc=\$?; echo \"__OCA_EXIT_\$__oca_rc\""
+        val wrapped = command + "; __oca_rc=${'$'}?; echo \"__OCA_EXIT_${'$'}__oca_rc\""
         val argv = mutableListOf(proot.absolutePath)
         argv.addAll(prootArgs(cwdInEnv))
         argv.add("/bin/bash")
@@ -1030,20 +1030,20 @@ class LinuxEnvManager(private val context: Context, val scope: CoroutineScope) {
 
         /**
          * Skrip wrapper crontab (ditulis persis ke rootfs/usr/local/bin/crontab).
-         * Di raw string Kotlin, tanda $ di-escape menjadi \$.
+         * Di raw string Kotlin, tanda $ di-escape menjadi ${'$'}.
          */
         val CRONTAB_SCRIPT: String = """
             #!/bin/bash
             # Wrapper crontab Open Chat AI — menyimpan di /var/spool/cron/crontabs/root
             CRON_DIR=/var/spool/cron/crontabs
-            CRON_FILE=\$CRON_DIR/root
-            mkdir -p "\$CRON_DIR"
-            case "\$1" in
-              -l) [ -f "\$CRON_FILE" ] && cat "\$CRON_FILE" || echo "no crontab for root" ;;
-              -r) rm -f "\$CRON_FILE"; echo "crontab removed" ;;
-              -e) if [ -n "\$EDITOR" ] && command -v "\$EDITOR" >/dev/null 2>&1; then "\$EDITOR" "\$CRON_FILE"; else echo "Tidak ada editor interaktif. Gunakan: echo '*/5 * * * * command' | crontab -"; [ -f "\$CRON_FILE" ] && echo "--- crontab saat ini ---" && cat "\$CRON_FILE"; fi ;;
-              "") cat > "\$CRON_FILE"; echo "crontab installed" ;;
-              *) if [ -f "\$1" ]; then cp "\$1" "\$CRON_FILE"; echo "crontab installed from \$1"; else echo "usage: crontab [-l|-r|-e|file] atau echo '...' | crontab -"; exit 1; fi ;;
+            CRON_FILE=${'$'}CRON_DIR/root
+            mkdir -p "${'$'}CRON_DIR"
+            case "${'$'}1" in
+              -l) [ -f "${'$'}CRON_FILE" ] && cat "${'$'}CRON_FILE" || echo "no crontab for root" ;;
+              -r) rm -f "${'$'}CRON_FILE"; echo "crontab removed" ;;
+              -e) if [ -n "${'$'}EDITOR" ] && command -v "${'$'}EDITOR" >/dev/null 2>&1; then "${'$'}EDITOR" "${'$'}CRON_FILE"; else echo "Tidak ada editor interaktif. Gunakan: echo '*/5 * * * * command' | crontab -"; [ -f "${'$'}CRON_FILE" ] && echo "--- crontab saat ini ---" && cat "${'$'}CRON_FILE"; fi ;;
+              "") cat > "${'$'}CRON_FILE"; echo "crontab installed" ;;
+              *) if [ -f "${'$'}1" ]; then cp "${'$'}1" "${'$'}CRON_FILE"; echo "crontab installed from ${'$'}1"; else echo "usage: crontab [-l|-r|-e|file] atau echo '...' | crontab -"; exit 1; fi ;;
             esac
         """.trimIndent() + "\n"
     }
