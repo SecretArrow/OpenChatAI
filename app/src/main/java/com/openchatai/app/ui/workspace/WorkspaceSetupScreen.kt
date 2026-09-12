@@ -216,8 +216,11 @@ fun WorkspaceSetupScreen(
                             project = project,
                             isActive = activeProject?.id == project.id,
                             onOpen = {
-                                vm.setActive(project)
-                                onWorkspaceReady()
+                                // Await inline (bukan fire-and-forget): onWorkspaceReady
+                                // baru SETELAH activeProject terisi + persist — navigasi
+                                // ke Chat tidak mendahului pengisian workspace (bug lama:
+                                // chat tidak muncul, gate setup tampil terus).
+                                vm.setActive(project) { onWorkspaceReady() }
                             },
                             onDelete = { deleteTarget = project }
                         )

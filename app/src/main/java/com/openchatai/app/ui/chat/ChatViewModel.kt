@@ -307,6 +307,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectProject(project: Project?) {
         container.activeProject.value = project
+        // Persist pilihan agar dipulihkan setelah restart (restore activeWorkspaceId
+        // di AppContainer). Persist async — UI state sudah terisi sinkron.
+        viewModelScope.launch {
+            runCatching {
+                settingsRepo.update { it.copy(activeWorkspaceId = project?.id.orEmpty()) }
+            }
+        }
     }
 
     /**
@@ -360,25 +367,46 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         // Slash commands dijawab lokal sebagai assistant echo — tanpa generasi.
         if (handleSlashCommand(convId, text)) return
 
-        // Gating workspace: engine AGENT butuh folder proyek aktif.
+        // Agent mode tanpa workspace aktif → buat OTOMATIS workspace app-private
+        // (chat tidak pernah macet di setup; workspace tetap nyata & ter-persist).
+        // Bila pembuatan gagal (storage error), echo error jelas dan berhenti.
+        var workspaceNote: String? = null
         if (settingsRepo.settings.value.engineMode == EngineMode.AGENT &&
             container.activeProject.value == null
         ) {
-            store.appendMessage(
-                convId,
-                ChatMessage(conversationId = convId, role = Role.USER, content = text)
-            )
-            appendLocalAssistant(
-                convId,
-                "Create a workspace first — pick a project folder.",
-                isError = true
-            )
-            return
+            val created = withContext(Dispatchers.IO) {
+                runCatching { container.workspaceManager.createProject("workspace") }.getOrNull()
+            }
+            if (created != null) {
+                container.activeProject.value = created
+                runCatching {
+                    settingsRepo.update { it.copy(activeWorkspaceId = created.id) }
+                }
+                refreshProjects()
+                workspaceNote =
+                    "Workspace \"${created.name}\" created automatically (app-private " +
+                    "storage). The agent reads and writes files inside it — switch to a " +
+                    "device folder anytime from the project selector."
+            } else {
+                store.appendMessage(
+                    convId,
+                    ChatMessage(conversationId = convId, role = Role.USER, content = text)
+                )
+                appendLocalAssistant(
+                    convId,
+                    "Could not create a workspace automatically (storage error). " +
+                        "Pick a device folder from the project selector, then try again.",
+                    isError = true
+                )
+                return
+            }
         }
 
         store.appendMessage(convId, ChatMessage(conversationId = convId, role = Role.USER, content = text))
         _messages.value = store.messages(convId)
         refreshConversations()
+        // Catatan pembuatan workspace otomatis (sebelum run agent dimulai).
+        workspaceNote?.let { appendLocalAssistant(convId, it) }
         // Simpan mode izin run ini (dasar keputusan plan approval nanti).
         lastRunMode.value = settingsRepo.settings.value.permissionMode
         generationManager.start(convId)

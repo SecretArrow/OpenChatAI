@@ -103,8 +103,10 @@ fun ProjectsScreen(
                             fileCount = fileCounts[project.id] ?: 0,
                             isActive = activeProject?.id == project.id,
                             onOpen = {
-                                vm.setActive(project)
-                                onProjectSelected()
+                                // Await inline: onProjectSelected (navigasi ke Chat) baru
+                                // dipanggil SETELAH activeProject terisi + persist —
+                                // mencegah race "chat tampil gate setup" (bug lama).
+                                vm.setActive(project) { onProjectSelected() }
                             },
                             onRename = { renameTarget = project },
                             onDelete = { deleteTarget = project },

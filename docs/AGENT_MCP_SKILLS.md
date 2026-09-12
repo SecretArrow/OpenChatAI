@@ -20,7 +20,9 @@ Aktivitas agent tampil manusiawi di chat (`✓ Analyzing project`, `⏳ Installi
 
 ### Workspace
 
-- Workspace **wajib di-setup** sebelum agent bekerja — dipilih lewat SAF (storage perangkat atau penyedia dokumen).
+- **Chat selalu bisa dibuka** — tidak ada lagi layar wajib yang memblokir (v1.9.1). Kebutuhan workspace ditandai banner kecil non-blocking di chat dengan aksi satu tap.
+- Agent bekerja di dalam satu workspace aktif: **app-private** (dibuat otomatis saat Anda mengirim prompt agent tanpa workspace) atau **folder device via SAF** (pilih lewat banner **Set up** atau tab Projects).
+- Workspace aktif **dipersist** (`activeWorkspaceId`) dan dipulihkan otomatis saat app dibuka ulang; memilih workspace dari layar mana pun menunggu aktivasi selesai dulu (anti-race), jadi chat selalu terbuka dengan workspace sudah aktif.
 - Operasi file (`list_files`, `read_file`, `write_file`, `delete_file`, `search`) dibatasi root workspace.
 - Dukungan **`AGENTS.md`** per project: instruksi konvensi project dibaca otomatis dan disuntikkan ke konteks agent.
 - Maksimum iterasi tool loop dapat diatur di Settings.

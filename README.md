@@ -6,7 +6,7 @@
 
 ![CI](https://github.com/SecretArrow/OpenChatAI/actions/workflows/android-ci.yml/badge.svg)
 
-**Versi terbaru:** v1.9.0 (versionCode 11) · paket `com.openchatai.app` · minSdk 26 · ABI `arm64-v8a` + `x86_64`
+**Versi terbaru:** v1.9.1 (versionCode 12) · paket `com.openchatai.app` · minSdk 26 · ABI `arm64-v8a` + `x86_64`
 
 ## Fitur
 
@@ -19,7 +19,7 @@
 - Regenerate, Retry, Stop generation, Edit message, lanjut percakapan
 - Riwayat percakapan lokal, percakapan per-project, layar History dengan pencarian
 - **Export chat**: bagikan percakapan sebagai Markdown lewat share sheet Android
-- **Workspace selalu tampil** di header; workspace aktif & model terpilih dipulihkan otomatis saat app dibuka ulang (tanpa restart kedua)
+- **Chat selalu tampil sejak detik pertama** (v1.9.1): tidak ada lagi redirect paksa ke layar setup — buka app, chat langsung ada; percakapan lama selalu bisa dibuka dari drawer/History
 
 ### AI Provider
 - **On-device (tanpa aplikasi lain!)**: llama.cpp embedded via JNI — 10 model GGUF di katalog (Qwen3.5 0.8B, LFM2 1.2B, Qwen3 0.6B, Llama 3.2 1B, Qwen2.5 0.5B/1.5B Coder, Gemma 2, Phi-3.5 Mini) diunduh langsung dari dalam aplikasi (layar **Models**), inferensi 100% di perangkat, streaming, pause/resume unduhan, import/export file GGUF via SAF → lihat [docs/LOCAL_AI.md](docs/LOCAL_AI.md)
@@ -43,7 +43,7 @@
 - Arsitektur modular: `GUI → AgentOrchestrator → Engine`
 - **Mode izin**: Ask, Plan, Auto Read-Edit, YOLO — YOLO benar-benar auto-approve semua tool (create/modify/delete file, npm/node/test/build) dengan tetap dibatasi workspace + blocklist command berbahaya
 - **Workspace aktif = satu sumber kebenaran**: agent mengetahui path workspace, file tools & `run_command` berjalan di dalamnya; **command sandbox Linux di-bind langsung ke folder workspace Android** (`-b <workspace>:/home/user/workspace`), sehingga `npm create vite`, `npm install`, `npm run build` benar-benar menyentuh file project
-- **Workspace wajib ter-setup** (SAF atau app-dir) + dukungan `AGENTS.md` per project
+- **Workspace tanpa gesekan (v1.9.1)**: kirim prompt agent tanpa workspace → workspace app-private dibuat **otomatis** (persist antar restart); banner kecil non-blocking di chat menawarkan tombol **Use app-private** / **Set up** (folder device); memilih workspace dari layar mana pun kini anti-race — chat langsung terbuka dengan workspace sudah aktif
 - **Built-in agent**: tool loop ter-sandbox — `list_files`, `read_file`, `write_file`, `delete_file`, `search`, `run_command` — progress ditampilkan sebagai kartu aktivitas collapsible di chat
 - **OpenCode engine** (opsional): hubungkan ke server OpenCode (`opencode serve`) via HTTP; bila tidak tersedia, otomatis fallback
 - `run_command` dieksekusi di **sandbox Linux tertanam** bila siap (lihat di bawah), fallback ke shell Android
@@ -159,6 +159,7 @@ Open Chat AI men-embed [llama.cpp](https://github.com/ggml-org/llama.cpp) (pin t
 | v1.8.0 | **Lingkungan Linux embedded** (proot + Ubuntu, apt/Node/Python), rename paket `com.openchatai.app`, Toast konfirmasi konfigurasi |
 | v1.8.1 | Katalog model low-RAM (Qwen3.5 0.8B, LFM2 1.2B, Qwen3 0.6B, Qwen2.5 0.5B Q4_K_M), sizeBytes eksak, semua model teruji inferensi |
 | v1.9.0 | **Audit & perbaikan root-cause**: chat langsung muncul setelah create workspace (race lifecycle diperbaiki), command agent & terminal ter-bind ke workspace aktif, Ollama auto-detect + Start + Test model, model selector di header, agent actions satu tombol, auto-scroll + "New messages", **Terminal sebagai Activity terpisah**, agent events collapsible |
+| v1.9.1 | **Fix "chat tidak muncul — terus di setup workspace"**: hapus redirect paksa ke setup saat startup, gate full-screen diganti banner non-blocking (chat & percakapan selalu tampil), workspace app-private dibuat otomatis saat kirim prompt agent tanpa workspace, semua alur pilih-workspace anti-race (await sebelum navigasi), pilihan workspace dari chat chip ikut dipersist |
 
 ## Attribution & Lisensi
 

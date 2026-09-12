@@ -20,7 +20,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -84,21 +83,12 @@ fun AppNavGraph(container: AppContainer) {
         }
     }
 
-    // Gating first-run: chat Agent mode WAJIB workspace aktif. Tunggu sinyal
-    // initState dari AppContainer (snapshot settings pertama + attempt restore
-    // SELESAI) — menggantikan delay(400) heuristik yang rapuh; navigasi hanya
-    // bila setelah restore tetap belum ada workspace aktif → layar setup.
-    val initState by container.initState.collectAsStateWithLifecycle()
-    LaunchedEffect(initState) {
-        if (initState && container.activeProject.value == null) {
-            navController.navigate(Routes.WORKSPACE_SETUP) {
-                // Start destination (Chat) tetap di back stack — back dari setup
-                // kembali ke Chat yang menampilkan ajakan membuka setup lagi.
-                popUpTo(navController.graph.findStartDestination().id) { inclusive = false }
-                launchSingleTop = true
-            }
-        }
-    }
+    // CATATAN (v1.9.1): TIDAK ada lagi redirect otomatis ke layar setup workspace
+    // saat startup. Chat adalah beranda yang SELALU tampil; kebutuhan workspace
+    // di-mode AGENT ditandai banner non-blocking di ChatScreen (aksi setup satu
+    // tap), dan workspace app-private dibuat otomatis saat user mengirim prompt
+    // agent tanpa workspace. Ini akar perbaikan bug "chat tidak muncul — terus
+    // di setup workspace": tidak ada lagi pintu yang memaksa user lewat setup.
 
     ModalNavigationDrawer(
         drawerState = drawerState,

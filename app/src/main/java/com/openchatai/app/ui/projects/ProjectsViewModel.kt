@@ -118,9 +118,24 @@ class ProjectsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Tetap publik (dipakai ProjectsScreen) — fire-and-forget via korutina VM. */
+    /** Tetap publik (dipakai tanpa navigasi lanjutan) — fire-and-forget via korutina VM. */
     fun setActive(project: Project) {
         viewModelScope.launch { activate(project) }
+    }
+
+    /**
+     * Aktifkan workspace lalu panggil [onDone] SETELAH activeProject benar-benar
+     * terisi + persist (await INLINE, bukan fire-and-forget). WAJIB dipakai oleh
+     * semua alur yang LANGSUNG navigasi ke Chat setelahnya (WorkspaceSetupScreen
+     * tap-existing, ProjectsScreen tap-open) — bila memakai varian fire-and-forget,
+     * navigasi mendahului pengisian workspace aktif dan gate "Create a workspace
+     * first" tampil padahal workspace sudah dibuat (bug "chat tidak muncul").
+     */
+    fun setActive(project: Project, onDone: (Project) -> Unit) {
+        viewModelScope.launch {
+            activate(project)
+            onDone(project)
+        }
     }
 
     /** Workspace app-dir baru (createProject) + langsung diaktifkan. */

@@ -18,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -53,7 +52,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -134,8 +132,9 @@ fun ChatScreen(
     val pendingPermission by chatViewModel.pendingPermission.collectAsStateWithLifecycle()
     val planApproval by chatViewModel.planApproval.collectAsStateWithLifecycle()
 
-    // Gating workspace: engine AGENT butuh folder proyek aktif.
-    val workspaceGate = settings.engineMode == EngineMode.AGENT && activeProject == null
+    // Banner workspace (NON-blocking): mode AGENT tanpa proyek aktif tetap
+    // menampilkan chat — aksi setup disediakan sebagai tombol di banner.
+    val needsWorkspace = settings.engineMode == EngineMode.AGENT && activeProject == null
 
     // State generasi sesi AKTIF saja (sesi lain tetap jalan di background).
     val activeRunning = activeId?.let { genStates[it] } as? SessionGenState.Running
@@ -356,65 +355,61 @@ fun ChatScreen(
         ) {
             StatusBanner(text = engineMessage, dotColor = TerminalYellow)
         }
-
-        // ---------------- Messages / workspace gate ----------------
-        if (workspaceGate) {
-            // Overlay full-column: agent butuh workspace sebelum bisa jalan
-            // (menggantikan EmptyChatState).
-            WorkspaceGate(
+        // Banner workspace: chat TETAP tampil (pesan & percakapan selalu bisa
+        // dibuka); setup workspace hanya satu tap lewat banner ini.
+        if (needsWorkspace) {
+            WorkspaceBanner(
                 onPickFolder = onOpenWorkspaceSetup,
-                onUseAppWorkspace = chatViewModel::createNewAppWorkspace,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
+                onUseAppWorkspace = chatViewModel::createNewAppWorkspace
             )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                state = listState,
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                if (messages.isEmpty()) {
-                    item(key = "empty") {
-                        EmptyChatState(onSuggestion = chatViewModel::send)
-                    }
-                } else {
-                    items(messages, key = { it.id }) { message ->
-                        MessageBubble(
-                            message = message,
-                            isLastAssistant = message.id == lastAssistantId,
-                            isGenerating = isGenerating,
-                            fontScale = settings.chatFontScale,
-                            onCopy = { text -> clipboard.setText(AnnotatedString(text)) },
-                            onEdit = { id, newText -> chatViewModel.editMessage(id, newText) },
-                            onRegenerate = chatViewModel::regenerate,
-                            onRetry = chatViewModel::retryLast
-                        )
-                    }
+        }
+
+        // ---------------- Messages (SELALU tampil — tidak ada gate) ----------------
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            state = listState,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (messages.isEmpty()) {
+                item(key = "empty") {
+                    EmptyChatState(onSuggestion = chatViewModel::send)
                 }
-                // Streaming overlay sesi aktif (Running): steps + partial + typing.
-                // TIDAK menambah pesan permanen — pesan final dimuat VM dari store
-                // saat state terminal (Done/Failed/Cancelled).
-                if (streamingVisible && activeRunning != null) {
-                    item(key = "streaming") {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            if (activeRunning.steps.isNotEmpty()) {
-                                CollapsibleAgentActivityCard(
-                                    steps = activeRunning.steps,
-                                    isLive = true
-                                )
-                            }
-                            if (activeRunning.partialText.isNotBlank()) {
-                                MarkdownText(
-                                    content = activeRunning.partialText,
-                                    fontScale = settings.chatFontScale
-                                )
-                            }
-                            TypingIndicator()
+            } else {
+                items(messages, key = { it.id }) { message ->
+                    MessageBubble(
+                        message = message,
+                        isLastAssistant = message.id == lastAssistantId,
+                        isGenerating = isGenerating,
+                        fontScale = settings.chatFontScale,
+                        onCopy = { text -> clipboard.setText(AnnotatedString(text)) },
+                        onEdit = { id, newText -> chatViewModel.editMessage(id, newText) },
+                        onRegenerate = chatViewModel::regenerate,
+                        onRetry = chatViewModel::retryLast
+                    )
+                }
+            }
+            // Streaming overlay sesi aktif (Running): steps + partial + typing.
+            // TIDAK menambah pesan permanen — pesan final dimuat VM dari store
+            // saat state terminal (Done/Failed/Cancelled).
+            if (streamingVisible && activeRunning != null) {
+                item(key = "streaming") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (activeRunning.steps.isNotEmpty()) {
+                            CollapsibleAgentActivityCard(
+                                steps = activeRunning.steps,
+                                isLive = true
+                            )
                         }
+                        if (activeRunning.partialText.isNotBlank()) {
+                            MarkdownText(
+                                content = activeRunning.partialText,
+                                fontScale = settings.chatFontScale
+                            )
+                        }
+                        TypingIndicator()
                     }
                 }
             }
@@ -650,51 +645,58 @@ private fun PlanApprovalCard(
 }
 
 /**
- * Workspace gate (engineMode AGENT tanpa proyek aktif): overlay full-column
- * pengganti EmptyChatState — agent menolak jalan tanpa folder proyek.
+ * Banner workspace (engineMode AGENT tanpa proyek aktif) — NON-blocking:
+ * satu baris di atas pesan, chat & percakapan TETAP tampil penuh. Aksi:
+ * buat app-private sekali tap, atau buka layar setup (folder device/SAF).
+ * Banner hilang otomatis begitu activeProject terisi.
  */
 @Composable
-private fun WorkspaceGate(
+private fun WorkspaceBanner(
     onPickFolder: () -> Unit,
     onUseAppWorkspace: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(
-        modifier = modifier.padding(horizontal = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
     ) {
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-            Box(modifier = Modifier.padding(18.dp), contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = Icons.Filled.Build,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(28.dp)
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StatusDot(MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Agent mode works in a workspace",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(
+                onClick = onUseAppWorkspace,
+                contentPadding = PaddingValues(horizontal = 6.dp)
+            ) {
+                Text(
+                    "Use app-private",
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1
                 )
             }
-        }
-        Spacer(Modifier.height(20.dp))
-        Text(
-            text = "Create a workspace first",
-            style = MaterialTheme.typography.titleLarge,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text = "Agent mode works inside a project folder so it can read and " +
-                "edit real files. Pick a device folder, or create an app-private " +
-                "workspace now.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center
-        )
-        Spacer(Modifier.height(24.dp))
-        Button(onClick = onPickFolder) {
-            Text("Pick a device folder")
-        }
-        TextButton(onClick = onUseAppWorkspace) {
-            Text("Use app-private workspace")
+            TextButton(
+                onClick = onPickFolder,
+                contentPadding = PaddingValues(horizontal = 6.dp)
+            ) {
+                Text(
+                    "Set up",
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1
+                )
+            }
         }
     }
 }
