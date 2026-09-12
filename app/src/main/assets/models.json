@@ -1,56 +1,92 @@
 [
   {
-    "id": "qwen2.5-0.5b-instruct-q8_0",
+    "id": "Qwen2.5-0.5B-Instruct-Q4_K_M",
     "name": "Qwen2.5 0.5B Instruct",
     "family": "qwen",
-    "quant": "Q8_0",
-    "sizeBytes": 631000000,
-    "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf",
-    "description": "Smallest Qwen2.5 — fast replies and low RAM usage; a good default assistant on entry-level phones."
+    "quant": "Q4_K_M",
+    "sizeBytes": 397808192,
+    "url": "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf",
+    "description": "Lightest Qwen2.5 (Q4_K_M) — ultra-light backup assistant for entry-level phones, roughly 0.9-1.3 GB RAM."
   },
   {
-    "id": "qwen2.5-coder-1.5b-instruct-q4_k_m",
-    "name": "Qwen2.5 Coder 1.5B Instruct",
+    "id": "Qwen3-0.6B-Q4_0",
+    "name": "Qwen3 0.6B",
+    "family": "qwen",
+    "quant": "Q4_0",
+    "sizeBytes": 428970080,
+    "url": "https://huggingface.co/ggml-org/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_0.gguf",
+    "description": "Qwen3 0.6B — very stable and light with thinking mode; roughly 1.0-1.5 GB RAM during use."
+  },
+  {
+    "id": "Qwen_Qwen3.5-0.8B-Q4_K_M",
+    "name": "Qwen3.5 0.8B",
     "family": "qwen",
     "quant": "Q4_K_M",
-    "sizeBytes": 986000000,
-    "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-    "description": "Code-specialized Qwen2.5 — the best pick for coding questions on mid-range phones."
+    "sizeBytes": 579615840,
+    "url": "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf",
+    "description": "Newest and smartest tiny Qwen (3.5 gen) — best quality per MB here; top pick for phones under 4 GB RAM."
+  },
+  {
+    "id": "qwen2.5-0.5b-instruct-q8_0",
+    "name": "Qwen2.5 0.5B Instruct (Q8_0)",
+    "family": "qwen",
+    "quant": "Q8_0",
+    "sizeBytes": 675710816,
+    "url": "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q8_0.gguf",
+    "description": "Same tiny Qwen2.5 at higher 8-bit quality — slightly larger, sharper wording than the Q4 build."
+  },
+  {
+    "id": "LFM2-1.2B-Q4_K_M",
+    "name": "LFM2 1.2B",
+    "family": "lfm2",
+    "quant": "Q4_K_M",
+    "sizeBytes": 730893248,
+    "url": "https://huggingface.co/LiquidAI/LFM2-1.2B-GGUF/resolve/main/LFM2-1.2B-Q4_K_M.gguf",
+    "description": "LiquidAI LFM2 — hybrid architecture built for edge/mobile devices, fast first token and low power."
   },
   {
     "id": "Llama-3.2-1B-Instruct-Q4_K_M",
     "name": "Llama 3.2 1B Instruct",
     "family": "llama",
     "quant": "Q4_K_M",
-    "sizeBytes": 808000000,
+    "sizeBytes": 807694464,
     "url": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
     "description": "Meta's compact Llama 3.2 — balanced quality and speed for everyday chat."
+  },
+  {
+    "id": "qwen2.5-coder-1.5b-instruct-q4_k_m",
+    "name": "Qwen2.5 Coder 1.5B Instruct",
+    "family": "qwen",
+    "quant": "Q4_K_M",
+    "sizeBytes": 1117320768,
+    "url": "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+    "description": "Code-specialized Qwen2.5 — the best pick for coding questions on mid-range phones."
   },
   {
     "id": "gemma-2-2b-it-Q4_K_M",
     "name": "Gemma 2 2B IT",
     "family": "gemma",
     "quant": "Q4_K_M",
-    "sizeBytes": 1670000000,
+    "sizeBytes": 1708582752,
     "url": "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/resolve/main/gemma-2-2b-it-Q4_K_M.gguf",
     "description": "Google Gemma 2 2B — strong general quality; needs roughly 2.5 GB of free RAM."
-  },
-  {
-    "id": "Phi-3.5-mini-instruct-Q4_K_M",
-    "name": "Phi-3.5 Mini Instruct",
-    "family": "phi",
-    "quant": "Q4_K_M",
-    "sizeBytes": 2390000000,
-    "url": "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
-    "description": "Microsoft Phi-3.5 Mini (3.8B) — strongest reasoning in this catalog; for 6 GB+ RAM devices."
   },
   {
     "id": "Qwen2.5-Coder-3B-Instruct-Q4_K_M",
     "name": "Qwen2.5 Coder 3B Instruct",
     "family": "qwen",
     "quant": "Q4_K_M",
-    "sizeBytes": 1930000000,
+    "sizeBytes": 1929903360,
     "url": "https://huggingface.co/bartowski/Qwen2.5-Coder-3B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-3B-Instruct-Q4_K_M.gguf",
     "description": "Bigger code model — better at refactoring and longer coding sessions; for 6 GB+ RAM devices."
+  },
+  {
+    "id": "Phi-3.5-mini-instruct-Q4_K_M",
+    "name": "Phi-3.5 Mini Instruct",
+    "family": "phi",
+    "quant": "Q4_K_M",
+    "sizeBytes": 2393232672,
+    "url": "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf",
+    "description": "Microsoft Phi-3.5 Mini (3.8B) — strongest reasoning in this catalog; for 6 GB+ RAM devices."
   }
 ]
