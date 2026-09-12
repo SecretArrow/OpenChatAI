@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.openchai.app.background.SessionGenState
 import com.openchai.app.ui.chat.ChatViewModel
 import com.openchai.core.model.Conversation
 import java.text.SimpleDateFormat
@@ -54,6 +57,7 @@ fun HistoryScreen(
 ) {
     val conversations by chatViewModel.conversations.collectAsStateWithLifecycle()
     val activeId by chatViewModel.activeConversationId.collectAsStateWithLifecycle()
+    val genStates by chatViewModel.genStates.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
@@ -149,6 +153,7 @@ fun HistoryScreen(
                         ConversationRow(
                             conversation = convo,
                             isActive = convo.id == activeId,
+                            isGenerating = genStates[convo.id] is SessionGenState.Running,
                             onOpen = {
                                 chatViewModel.selectConversation(convo.id)
                                 onOpenConversation()
@@ -166,6 +171,7 @@ fun HistoryScreen(
 private fun ConversationRow(
     conversation: Conversation,
     isActive: Boolean,
+    isGenerating: Boolean,
     onOpen: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -201,6 +207,15 @@ private fun ConversationRow(
                     text = "Updated " + formatTime(conversation.updatedAt),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            // Indikator kecil sesi yang sedang generating di background.
+            if (isGenerating) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .size(12.dp),
+                    strokeWidth = 2.dp
                 )
             }
             IconButton(onClick = onDelete) {

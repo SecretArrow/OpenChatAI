@@ -7,13 +7,18 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -22,12 +27,15 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.openchai.app.AppContainer
+import com.openchai.app.background.SessionDeepLink
 import com.openchai.app.ui.chat.ChatScreen
 import com.openchai.app.ui.chat.ChatViewModel
 import com.openchai.app.ui.history.HistoryScreen
 import com.openchai.app.ui.models.ModelsScreen
 import com.openchai.app.ui.projects.ProjectsScreen
+import com.openchai.app.ui.sessions.SessionsDrawer
 import com.openchai.app.ui.settings.SettingsScreen
+import kotlinx.coroutines.launch
 
 object Routes {
     const val CHAT = "chat"
@@ -47,82 +55,111 @@ fun AppNavGraph(container: AppContainer) {
     // (History membuka percakapan ke tab Chat yang sama).
     val chatViewModel: ChatViewModel = viewModel()
 
-    Scaffold(
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = currentRoute == Routes.CHAT,
-                    onClick = { navigateTo(navController, Routes.CHAT) },
-                    icon = { Icon(Icons.Filled.Home, contentDescription = "Chat") },
-                    label = { Text("Chat") }
-                )
-                NavigationBarItem(
-                    selected = currentRoute == Routes.HISTORY,
-                    onClick = { navigateTo(navController, Routes.HISTORY) },
-                    icon = { Icon(Icons.Filled.DateRange, contentDescription = "History") },
-                    label = { Text("History") }
-                )
-                NavigationBarItem(
-                    selected = currentRoute == Routes.PROJECTS,
-                    onClick = { navigateTo(navController, Routes.PROJECTS) },
-                    icon = { Icon(Icons.Filled.Build, contentDescription = "Projects") },
-                    label = { Text("Projects") }
-                )
-                NavigationBarItem(
-                    selected = currentRoute == Routes.MODELS,
-                    onClick = { navigateTo(navController, Routes.MODELS) },
-                    icon = { Icon(Icons.Filled.List, contentDescription = "Models") },
-                    label = { Text("Models") }
-                )
-                NavigationBarItem(
-                    selected = currentRoute == Routes.SETTINGS,
-                    onClick = { navigateTo(navController, Routes.SETTINGS) },
-                    icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
-                    label = { Text("Settings") }
-                )
+    // Drawer "Chats" (daftar sesi paralel) + scope untuk buka/tutup drawer.
+    val scope = rememberCoroutineScope()
+    val drawerState = rememberDrawerState(DrawerValue.Hidden)
+
+    // Deep-link dari notifikasi background generation: pindah ke sesi yang
+    // dinotifikasi, lalu kosongkan agar tidak terpicu ulang saat recompose.
+    LaunchedEffect(Unit) {
+        SessionDeepLink.pendingSessionId.collect { sid ->
+            if (sid != null) {
+                chatViewModel.selectConversation(sid)
+                navigateTo(navController, Routes.CHAT)
+                SessionDeepLink.pendingSessionId.value = null
             }
         }
-    ) { padding ->
-        NavHost(
-            navController = navController,
-            startDestination = Routes.CHAT,
-            modifier = Modifier.padding(padding)
-        ) {
-            composable(Routes.CHAT) {
-                ChatScreen(
-                    chatViewModel = chatViewModel,
-                    onOpenProjects = {
-                        navController.navigate(Routes.PROJECTS) { launchSingleTop = true }
-                    },
-                    onOpenSettings = {
-                        navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
-                    }
-                )
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            SessionsDrawer(
+                chatViewModel = chatViewModel,
+                drawerState = drawerState,
+                scope = scope,
+                onNavigateChat = { navigateTo(navController, Routes.CHAT) }
+            )
+        }
+    ) {
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = currentRoute == Routes.CHAT,
+                        onClick = { navigateTo(navController, Routes.CHAT) },
+                        icon = { Icon(Icons.Filled.Home, contentDescription = "Chat") },
+                        label = { Text("Chat") }
+                    )
+                    NavigationBarItem(
+                        selected = currentRoute == Routes.HISTORY,
+                        onClick = { navigateTo(navController, Routes.HISTORY) },
+                        icon = { Icon(Icons.Filled.DateRange, contentDescription = "History") },
+                        label = { Text("History") }
+                    )
+                    NavigationBarItem(
+                        selected = currentRoute == Routes.PROJECTS,
+                        onClick = { navigateTo(navController, Routes.PROJECTS) },
+                        icon = { Icon(Icons.Filled.Build, contentDescription = "Projects") },
+                        label = { Text("Projects") }
+                    )
+                    NavigationBarItem(
+                        selected = currentRoute == Routes.MODELS,
+                        onClick = { navigateTo(navController, Routes.MODELS) },
+                        icon = { Icon(Icons.Filled.List, contentDescription = "Models") },
+                        label = { Text("Models") }
+                    )
+                    NavigationBarItem(
+                        selected = currentRoute == Routes.SETTINGS,
+                        onClick = { navigateTo(navController, Routes.SETTINGS) },
+                        icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
+                        label = { Text("Settings") }
+                    )
+                }
             }
-            composable(Routes.HISTORY) {
-                HistoryScreen(
-                    chatViewModel = chatViewModel,
-                    onOpenConversation = {
-                        navigateTo(navController, Routes.CHAT)
-                    }
-                )
-            }
-            composable(Routes.PROJECTS) {
-                ProjectsScreen(
-                    onProjectSelected = {
-                        navigateTo(navController, Routes.CHAT)
-                    }
-                )
-            }
-            composable(Routes.MODELS) {
-                ModelsScreen(
-                    onOpenChat = {
-                        navigateTo(navController, Routes.CHAT)
-                    }
-                )
-            }
-            composable(Routes.SETTINGS) {
-                SettingsScreen()
+        ) { padding ->
+            NavHost(
+                navController = navController,
+                startDestination = Routes.CHAT,
+                modifier = Modifier.padding(padding)
+            ) {
+                composable(Routes.CHAT) {
+                    ChatScreen(
+                        chatViewModel = chatViewModel,
+                        onOpenSessions = { scope.launch { drawerState.open() } },
+                        onOpenProjects = {
+                            navController.navigate(Routes.PROJECTS) { launchSingleTop = true }
+                        },
+                        onOpenSettings = {
+                            navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
+                        }
+                    )
+                }
+                composable(Routes.HISTORY) {
+                    HistoryScreen(
+                        chatViewModel = chatViewModel,
+                        onOpenConversation = {
+                            navigateTo(navController, Routes.CHAT)
+                        }
+                    )
+                }
+                composable(Routes.PROJECTS) {
+                    ProjectsScreen(
+                        onProjectSelected = {
+                            navigateTo(navController, Routes.CHAT)
+                        }
+                    )
+                }
+                composable(Routes.MODELS) {
+                    ModelsScreen(
+                        onOpenChat = {
+                            navigateTo(navController, Routes.CHAT)
+                        }
+                    )
+                }
+                composable(Routes.SETTINGS) {
+                    SettingsScreen()
+                }
             }
         }
     }

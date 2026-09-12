@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -95,6 +96,20 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
+                    // Preset cepat AgentRouter (router multi-arsitektur OpenAI
+                    // & Anthropic — cocok untuk uji model campuran).
+                    if (provider == ProviderId.ANTHROPIC || provider == ProviderId.OPENAI ||
+                        provider == ProviderId.CUSTOM
+                    ) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AssistChip(
+                                onClick = {
+                                    vm.update { copyEndpoint(it, provider, agentRouterEndpoint(provider)) }
+                                },
+                                label = { Text("Preset: AgentRouter") }
+                            )
+                        }
+                    }
                     var apiKeyInput by remember(provider) { mutableStateOf("") }
                     OutlinedTextField(
                         value = apiKeyInput,
@@ -493,6 +508,13 @@ private fun RuntimeRow(name: String, ok: Boolean, detail: String) {
 // ----------------------------------------------------------------------
 // Helpers endpoint per provider
 // ----------------------------------------------------------------------
+
+/** Endpoint AgentRouter sesuai arsitektur provider (router mendukung keduanya). */
+private fun agentRouterEndpoint(provider: ProviderId): String = when (provider) {
+    ProviderId.ANTHROPIC -> "https://agentrouter.org"
+    ProviderId.OPENAI, ProviderId.CUSTOM -> "https://agentrouter.org/v1"
+    else -> "https://agentrouter.org"
+}
 
 private fun endpointOf(settings: AppSettings, provider: ProviderId): String = when (provider) {
     ProviderId.OLLAMA -> settings.ollamaEndpoint

@@ -19,6 +19,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode">
             <intent-filter>
@@ -29,6 +30,12 @@
 
         <service
             android:name=".runtime.ProcessService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <!-- Notifikasi progress generasi AI multi-sesi di background -->
+        <service
+            android:name=".background.GenerationForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
     </application>

@@ -5,24 +5,22 @@ import android.net.ConnectivityManager
 import android.net.Network
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.openchai.app.AgentOrchestrator
-import com.openchai.app.OrchestrationEvent
 import com.openchai.app.OpenChatApp
-import com.openchai.core.model.ModelInfo
+import com.openchai.app.background.GenerationManagerProvider
+import com.openchai.app.background.SessionGenState
 import com.openchai.core.data.ConversationStore
 import com.openchai.core.model.ChatMessage
 import com.openchai.core.model.Conversation
+import com.openchai.core.model.ModelInfo
 import com.openchai.core.model.Project
 import com.openchai.core.model.ProviderId
 import com.openchai.core.model.Role
 import com.openchai.core.settings.AppSettings
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.UUID
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
 
 /** Status koneksi satu provider untuk Model Selector. */
 data class ProviderStatus(
@@ -37,11 +35,20 @@ data class EngineStatus(
     val message: String
 )
 
+/**
+ * ViewModel chat multi-sesi: UI hanya menyiapkan data di store lalu memulai /
+ * membatalkan generasi lewat [com.openchai.app.background.GenerationManager]
+ * (app-scoped, mendukung banyak sesi paralel). Logika orchestrator pindah
+ * sepenuhnya ke manager — ViewModel tidak lagi menjalankan generasi sendiri.
+ */
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val container = (app as OpenChatApp).container
     private val store: ConversationStore = container.conversationStore
     private val settingsRepo = container.settingsRepository
+
+    // Pusat generasi app-scoped (pola singleton sama dengan McpManagerProvider).
+    private val generationManager = GenerationManagerProvider.get(app)
 
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
@@ -52,6 +59,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val _activeConversationId = MutableStateFlow<String?>(null)
     val activeConversationId: StateFlow<String?> = _activeConversationId.asStateFlow()
 
+    // Derived dari state manager untuk sesi AKTIF (bukan blok global lagi).
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating.asStateFlow()
 
@@ -73,8 +81,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     val settings: StateFlow<AppSettings> = settingsRepo.settings
     val activeProject: StateFlow<Project?> = container.activeProject
 
-    private var currentJob: Job? = null
+    /** State generasi semua sesi (Running/Done/Failed/Cancelled) dari manager. */
+    val genStates: StateFlow<Map<String, SessionGenState>> = generationManager.states
+
     private var networkCallbackRegistered = false
+
+    // Terminal state yang sudah diproses (equals data class) agar reload pesan
+    // hanya terjadi SEKALI per kejadian Done/Failed/Cancelled.
+    private val consumedTerminalStates = mutableSetOf<SessionGenState>()
 
     init {
         viewModelScope.launch {
@@ -89,9 +103,42 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 selectConversation(convs.first().id)
             }
         }
+        observeGenerationStates()
         registerNetworkCallback()
         refreshEngineStatus()
     }
+
+    /**
+     * Sinkronisasi UI <-> GenerationManager (dijalankan di viewModelScope —
+     * aman, otomatis berhenti saat onCleared):
+     *  - isGenerating sesi aktif diturunkan dari state manager.
+     *  - Saat entri TERMINAL (Done/Failed/Cancelled) masuk untuk sesi aktif,
+     *    pesan akhir (sudah dipersist manager) dimuat ulang dari store sekali
+     *    per kejadian via [consumedTerminalStates].
+     */
+    private fun observeGenerationStates() {
+        viewModelScope.launch {
+            combine(generationManager.states, _activeConversationId) { states, activeId ->
+                states to activeId
+            }.collect { (states, activeId) ->
+                _isGenerating.value =
+                    activeId != null && states[activeId] is SessionGenState.Running
+                states.values.forEach { state ->
+                    val terminal = state !is SessionGenState.Running
+                    if (terminal && consumedTerminalStates.add(state)) {
+                        if (state.sessionId == activeId) {
+                            _messages.value = store.messages(state.sessionId)
+                        }
+                        // Urutan drawer / History ikut segar (updatedAt berubah).
+                        _conversations.value = store.conversations()
+                    }
+                }
+            }
+        }
+    }
+
+    /** State generasi satu sesi (helper ringkas untuk UI). */
+    fun genStateOf(sessionId: String): SessionGenState? = genStates.value[sessionId]
 
     // ------------------------------------------------------------------
     // Conversations
@@ -115,6 +162,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteConversation(id: String) {
         viewModelScope.launch {
+            // Hentikan dulu generasi sesi yang dihapus agar tidak menulis lagi ke store.
+            if (generationManager.isGenerating(id)) generationManager.cancel(id)
             store.deleteConversation(id)
             refreshConversations()
             if (_activeConversationId.value == id) {
@@ -159,57 +208,61 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ------------------------------------------------------------------
-    // Send / generate
+    // Send / generate (delegasi ke GenerationManager)
     // ------------------------------------------------------------------
 
     fun send(raw: String) {
         val text = raw.trim()
-        if (text.isEmpty() || _isGenerating.value) return
+        if (text.isEmpty()) return
         viewModelScope.launch {
             val convId = ensureConversation()
+            // Guard per-sesi: sesi lain tetap bisa mengirim saat sesi ini generating.
+            if (generationManager.isGenerating(convId)) return@launch
             store.appendMessage(convId, ChatMessage(conversationId = convId, role = Role.USER, content = text))
             _messages.value = store.messages(convId)
-            generate(convId)
+            refreshConversations()
+            generationManager.start(convId)
         }
     }
 
+    /** Stop hanya membatalkan generasi sesi yang sedang AKTIF di layar. */
     fun stopGeneration() {
-        currentJob?.cancel()
+        activeConversationId.value?.let { generationManager.cancel(it) }
     }
 
     /** Hapus balasan terakhir lalu generate ulang dari pesan user terakhir. */
     fun regenerate() {
-        if (_isGenerating.value) return
         viewModelScope.launch {
             val convId = _activeConversationId.value ?: return@launch
+            if (generationManager.isGenerating(convId)) return@launch
             val msgs = store.messages(convId)
             val lastUser = msgs.lastOrNull { it.role == Role.USER } ?: return@launch
             store.deleteMessagesFrom(convId, msgs.firstOrNull { it.timestamp > lastUser.timestamp }?.id ?: return@launch)
             _messages.value = store.messages(convId)
-            generate(convId)
+            generationManager.start(convId)
         }
     }
 
     /** Ulangi bila balasan terakhir adalah error. */
     fun retryLast() {
-        if (_isGenerating.value) return
         viewModelScope.launch {
             val convId = _activeConversationId.value ?: return@launch
+            if (generationManager.isGenerating(convId)) return@launch
             val msgs = store.messages(convId)
             val last = msgs.lastOrNull() ?: return@launch
             if (last.role == Role.ASSISTANT && last.isError) {
                 store.deleteMessagesFrom(convId, last.id)
                 _messages.value = store.messages(convId)
-                generate(convId)
+                generationManager.start(convId)
             }
         }
     }
 
     /** Edit pesan user: update isi, hapus semua pesan setelahnya, generate ulang. */
     fun editMessage(messageId: String, newContent: String) {
-        if (_isGenerating.value) return
         viewModelScope.launch {
             val convId = _activeConversationId.value ?: return@launch
+            if (generationManager.isGenerating(convId)) return@launch
             val msgs = store.messages(convId)
             val target = msgs.firstOrNull { it.id == messageId } ?: return@launch
             if (target.role != Role.USER) return@launch
@@ -217,101 +270,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             val next = msgs.firstOrNull { it.timestamp > target.timestamp }
             if (next != null) store.deleteMessagesFrom(convId, next.id)
             _messages.value = store.messages(convId)
-            generate(convId)
+            generationManager.start(convId)
         }
     }
-
-    private fun generate(convId: String) {
-        currentJob?.cancel()
-        currentJob = viewModelScope.launch {
-            _isGenerating.value = true
-            val all = store.messages(convId)
-            val lastUser = all.lastOrNull { it.role == Role.USER }
-            if (lastUser == null) {
-                _isGenerating.value = false
-                return@launch
-            }
-            val history = all
-                .filter { !it.isAgentActivity && it.role != Role.SYSTEM }
-                .dropLast(1)
-                .map { (if (it.role == Role.USER) "user" else "assistant") to it.content }
-
-            val activityId = UUID.randomUUID().toString()
-            val assistantId = UUID.randomUUID().toString()
-            val steps = mutableListOf<com.openchai.core.model.AgentStep>()
-            var assistantText = ""
-
-            fun renderActivity() = ChatMessage(
-                id = activityId,
-                conversationId = convId,
-                role = Role.ASSISTANT,
-                content = "",
-                steps = steps.toList(),
-                isAgentActivity = true
-            )
-
-            fun renderAssistant() = ChatMessage(
-                id = assistantId,
-                conversationId = convId,
-                role = Role.ASSISTANT,
-                content = assistantText
-            )
-
-            fun publish() {
-                val list = _messages.value.toMutableList()
-                list.removeAll { it.id == activityId || it.id == assistantId }
-                if (steps.isNotEmpty()) list.add(renderActivity())
-                if (assistantText.isNotBlank() || steps.isEmpty()) list.add(renderAssistant())
-                _messages.value = list
-            }
-
-            try {
-                container.orchestrator.execute(lastUser.content, history).collect { event ->
-                    when (event) {
-                        is OrchestrationEvent.StepsChanged -> {
-                            steps.clear()
-                            steps.addAll(event.steps)
-                            publish()
-                        }
-                        is OrchestrationEvent.PartialAnswer -> {
-                            assistantText = event.accumulated
-                            publish()
-                        }
-                        is OrchestrationEvent.Finished -> {
-                            assistantText = event.answer
-                        }
-                        is OrchestrationEvent.Failed -> {
-                            throw GenerationException(event.message)
-                        }
-                    }
-                }
-                if (steps.isNotEmpty()) store.appendMessage(convId, renderActivity())
-                store.appendMessage(
-                    convId,
-                    renderAssistant().copy(content = assistantText.ifBlank { "(empty response)" })
-                )
-                _messages.value = store.messages(convId)
-            } catch (c: CancellationException) {
-                if (steps.isNotEmpty()) store.appendMessage(convId, renderActivity())
-                val partial = assistantText.ifBlank { "Generation stopped." }
-                store.appendMessage(convId, renderAssistant().copy(content = "$partial\n\n_(stopped)_"))
-                _messages.value = store.messages(convId)
-                _isGenerating.value = false
-                throw c
-            } catch (e: Exception) {
-                val msg = (e as? GenerationException)?.message ?: (e.message ?: "Unexpected error")
-                store.appendMessage(
-                    convId,
-                    ChatMessage(conversationId = convId, role = Role.ASSISTANT, content = msg, isError = true)
-                )
-                _messages.value = store.messages(convId)
-            } finally {
-                _isGenerating.value = false
-            }
-        }
-    }
-
-    private class GenerationException(message: String) : RuntimeException(message)
 
     // ------------------------------------------------------------------
     // Providers & models (Model Selector)
@@ -396,6 +357,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         super.onCleared()
-        // currentJob dibatalkan otomatis oleh viewModelScope.
+        // Collector genStates mati bersama viewModelScope; generasi berlanjut di
+        // GenerationManager (app-scoped) — sesi lain tidak ikut berhenti.
     }
 }

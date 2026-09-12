@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AssistChip
@@ -46,6 +47,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.openchai.app.background.SessionGenState
 import com.openchai.app.ui.components.StatusDot
 import com.openchai.app.ui.theme.TerminalYellow
 import com.openchai.core.model.Role
@@ -61,13 +63,15 @@ private val SLASH_COMMANDS = listOf(
 )
 
 /**
- * Pusat pengalaman aplikasi: chat AI coding agent.
+ * Pusat pengalaman aplikasi: chat AI coding agent (multi-sesi paralel).
  *
  * Struktur (Column):
- *  - Header: judul "Open Chat AI" + tombol Settings.
+ *  - Header: tombol menu (buka drawer "Chats") + judul + tombol Settings.
  *  - Chip selector: Project & Model (buka ModalBottomSheet).
  *  - Banner status kecil (offline / engine fallback) — hanya saat perlu.
- *  - LazyColumn pesan (weight 1f) + EmptyChatState saat kosong + TypingIndicator saat menunggu.
+ *  - LazyColumn pesan (weight 1f) + EmptyChatState saat kosong + blok streaming
+ *    (kartu aktivitas agent + partial answer + TypingIndicator) saat sesi aktif
+ *    masih Running di GenerationManager.
  *  - ChatInputBar.
  *  - Toggle bar Terminal (slim) + TerminalPanel.
  *  - Sheets: ModelSelectorSheet & ProjectSelectorSheet.
@@ -75,16 +79,22 @@ private val SLASH_COMMANDS = listOf(
 @Composable
 fun ChatScreen(
     chatViewModel: ChatViewModel,
+    onOpenSessions: () -> Unit,
     onOpenProjects: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val messages by chatViewModel.messages.collectAsStateWithLifecycle()
-    val isGenerating by chatViewModel.isGenerating.collectAsStateWithLifecycle()
+    val activeId by chatViewModel.activeConversationId.collectAsStateWithLifecycle()
+    val genStates by chatViewModel.genStates.collectAsStateWithLifecycle()
     val networkAvailable by chatViewModel.networkAvailable.collectAsStateWithLifecycle()
     val engineStatus by chatViewModel.engineStatus.collectAsStateWithLifecycle()
     val settings by chatViewModel.settings.collectAsStateWithLifecycle()
     val activeProject by chatViewModel.activeProject.collectAsStateWithLifecycle()
+
+    // State generasi sesi AKTIF saja (sesi lain tetap jalan di background).
+    val activeRunning = activeId?.let { genStates[it] } as? SessionGenState.Running
+    val isGenerating = activeRunning != null
 
     val listState = rememberLazyListState()
     var showModelSheet by remember { mutableStateOf(false) }
@@ -134,19 +144,18 @@ fun ChatScreen(
         context.startActivity(Intent.createChooser(send, "Export conversation"))
     }
 
-    // Typing indicator hanya saat sedang generate dan belum ada delta jawaban terlihat
-    // (pesan terakhir masih milik user, kartu aktivitas agent, atau konten masih kosong).
-    val showTyping = isGenerating && (
-        lastMessage == null ||
-            lastMessage.role == Role.USER ||
-            lastMessage.isAgentActivity ||
-            lastMessage.content.isBlank()
-        )
-    val itemCount = if (messages.isEmpty()) 1 else messages.size + (if (showTyping) 1 else 0)
+    // Blok streaming overlay: tampil hanya saat sesi aktif masih Running.
+    // Pesan permanen tetap datang dari _messages setelah manager mempersist.
+    val streamingVisible = activeRunning != null
+    val streamProgress = (activeRunning?.steps?.size ?: 0) +
+        (activeRunning?.partialText?.length ?: 0)
+    val itemCount = messages.size +
+        (if (messages.isEmpty()) 1 else 0) +
+        (if (streamingVisible) 1 else 0)
     val lastContentLength = lastMessage?.content?.length ?: 0
 
     // Auto-scroll pintar: ikuti bawah saat generating, atau bila user sudah dekat bawah.
-    LaunchedEffect(messages.size, lastContentLength, isGenerating) {
+    LaunchedEffect(messages.size, lastContentLength, streamProgress, isGenerating) {
         if (messages.isEmpty()) return@LaunchedEffect
         val target = itemCount - 1
         val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
@@ -161,9 +170,13 @@ fun ChatScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
+                .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Buka drawer "Chats" (daftar sesi).
+            IconButton(onClick = onOpenSessions) {
+                Icon(Icons.Filled.Menu, contentDescription = "Open chats list")
+            }
             Text(
                 text = "Open Chat AI",
                 style = MaterialTheme.typography.titleLarge,
@@ -259,8 +272,22 @@ fun ChatScreen(
                         onRetry = chatViewModel::retryLast
                     )
                 }
-                if (showTyping) {
-                    item(key = "typing") {
+            }
+            // Streaming overlay sesi aktif (Running): steps + partial + typing.
+            // TIDAK menambah pesan permanen — pesan final dimuat VM dari store
+            // saat state terminal (Done/Failed/Cancelled).
+            if (streamingVisible && activeRunning != null) {
+                item(key = "streaming") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (activeRunning.steps.isNotEmpty()) {
+                            AgentActivityCard(steps = activeRunning.steps, isLive = true)
+                        }
+                        if (activeRunning.partialText.isNotBlank()) {
+                            MarkdownText(
+                                content = activeRunning.partialText,
+                                fontScale = settings.chatFontScale
+                            )
+                        }
                         TypingIndicator()
                     }
                 }
