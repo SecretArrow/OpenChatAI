@@ -1,32 +1,32 @@
 {
   "schema": 1,
-  "version": "1.7.0",
+  "version": "1.8.0",
   "packs": [
     {
       "id": "llama-cpu-arm64-v8a",
       "kind": "RUNTIME",
       "name": "llama.cpp CPU (arm64-v8a)",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "abi": "arm64-v8a",
       "feature": "local-inference",
       "required": false,
-      "sizeBytes": 2207280,
-      "sha256": "2fcf56bd638a202543e3f19cab38cc44744ed5449800ccb98376bc6a5942ee85",
-      "url": "https://github.com/SecretArrow/OpenChatAI/releases/download/v1.7.0/runtime-llama-cpu-arm64-v8a.zip",
-      "description": "libopenchai_llama.so (llama.cpp b10919, ggml statis) dari rilis v1.7.0 \u2014 diperbarui tanpa memperbarui APK."
+      "sizeBytes": 2708140,
+      "sha256": "d81b045d3b450a5e2f622d5e2b4944314fdbf1cd7901e67415acaca70e15300d",
+      "url": "https://github.com/SecretArrow/OpenChatAI/releases/download/v1.8.0/runtime-llama-cpu-arm64-v8a.zip",
+      "description": "libopenchai_llama.so (llama.cpp b10919, ggml statis) dari rilis v1.8.0 \u2014 diperbarui tanpa memperbarui APK."
     },
     {
       "id": "llama-cpu-x86_64",
       "kind": "RUNTIME",
       "name": "llama.cpp CPU (x86_64)",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "abi": "x86_64",
       "feature": "local-inference",
       "required": false,
-      "sizeBytes": 2339902,
-      "sha256": "271496927ff59a1a414f06ee27b3e1174bd7e001bc56d193d9b1f442be736103",
-      "url": "https://github.com/SecretArrow/OpenChatAI/releases/download/v1.7.0/runtime-llama-cpu-x86_64.zip",
-      "description": "libopenchai_llama.so (llama.cpp b10919, ggml statis) dari rilis v1.7.0 \u2014 diperbarui tanpa memperbarui APK."
+      "sizeBytes": 3070973,
+      "sha256": "aa373c1d57d56d775e6820c84bec1315a051fb9da3252dfe2baf6cc1079c2e9c",
+      "url": "https://github.com/SecretArrow/OpenChatAI/releases/download/v1.8.0/runtime-llama-cpu-x86_64.zip",
+      "description": "libopenchai_llama.so (llama.cpp b10919, ggml statis) dari rilis v1.8.0 \u2014 diperbarui tanpa memperbarui APK."
     }
   ]
 }
