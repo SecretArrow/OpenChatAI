@@ -12,6 +12,7 @@ class ProviderRegistry(
     val openai: AiProvider,
     val anthropic: AiProvider,
     val google: AiProvider,
+    val poolside: AiProvider,
     val custom: AiProvider,
     val local: AiProvider
 ) {
@@ -20,6 +21,7 @@ class ProviderRegistry(
         ProviderId.OPENAI to openai,
         ProviderId.ANTHROPIC to anthropic,
         ProviderId.GOOGLE to google,
+        ProviderId.POOLSIDE to poolside,
         ProviderId.CUSTOM to custom,
         ProviderId.LOCAL to local
     )

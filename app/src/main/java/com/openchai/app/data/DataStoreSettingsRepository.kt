@@ -37,6 +37,7 @@ private val KEY_OLLAMA_ENDPOINT = stringPreferencesKey("ollama_endpoint")
 private val KEY_OPENAI_ENDPOINT = stringPreferencesKey("openai_endpoint")
 private val KEY_ANTHROPIC_ENDPOINT = stringPreferencesKey("anthropic_endpoint")
 private val KEY_GOOGLE_ENDPOINT = stringPreferencesKey("google_endpoint")
+private val KEY_POOLSIDE_ENDPOINT = stringPreferencesKey("poolside_endpoint")
 private val KEY_CUSTOM_ENDPOINT = stringPreferencesKey("custom_endpoint")
 private val KEY_LOCAL_MODEL_PATH = stringPreferencesKey("local_model_path")
 private val KEY_LOCAL_CONTEXT_SIZE = intPreferencesKey("local_context_size")
@@ -86,6 +87,7 @@ class DataStoreSettingsRepository(
             prefs[KEY_OPENAI_ENDPOINT] = next.openaiEndpoint
             prefs[KEY_ANTHROPIC_ENDPOINT] = next.anthropicEndpoint
             prefs[KEY_GOOGLE_ENDPOINT] = next.googleEndpoint
+            prefs[KEY_POOLSIDE_ENDPOINT] = next.poolsideEndpoint
             prefs[KEY_CUSTOM_ENDPOINT] = next.customEndpoint
             prefs[KEY_LOCAL_MODEL_PATH] = next.localModelPath
             prefs[KEY_LOCAL_CONTEXT_SIZE] = next.localContextSize
@@ -102,11 +104,24 @@ class DataStoreSettingsRepository(
         }
     }
 
-    override suspend fun apiKey(provider: ProviderId): String =
-        secure.apiKey(API_KEY_PREFIX + provider.name)
+    override suspend fun apiKey(provider: ProviderId): String {
+        // Kunci utama tanpa prefix — HARUS sama dengan yang dibaca provider
+        // (secure.apiKey(providerId.name), mis. "OPENAI"/"POOLSIDE").
+        val direct = secure.apiKey(provider.name)
+        if (direct.isNotEmpty()) return direct
+        // Migrasi legacy: versi <1.5 menyimpan key dengan prefix "API_KEY_"
+        // sehingga TIDAK PERNAH terbaca provider — pindahkan ke kunci baru sekali saja.
+        val legacy = secure.apiKey(API_KEY_PREFIX + provider.name)
+        if (legacy.isNotEmpty()) {
+            secure.saveApiKey(provider.name, legacy)
+            secure.clearApiKey(API_KEY_PREFIX + provider.name)
+            return legacy
+        }
+        return ""
+    }
 
     override suspend fun setApiKey(provider: ProviderId, key: String): Unit =
-        secure.saveApiKey(API_KEY_PREFIX + provider.name, key)
+        secure.saveApiKey(provider.name, key)
 
     private fun Preferences.toAppSettings(): AppSettings = AppSettings(
         engineMode = enumOrDefault(this[KEY_ENGINE_MODE], EngineMode.AGENT),
@@ -116,6 +131,7 @@ class DataStoreSettingsRepository(
         openaiEndpoint = this[KEY_OPENAI_ENDPOINT] ?: DEFAULTS.openaiEndpoint,
         anthropicEndpoint = this[KEY_ANTHROPIC_ENDPOINT] ?: DEFAULTS.anthropicEndpoint,
         googleEndpoint = this[KEY_GOOGLE_ENDPOINT] ?: DEFAULTS.googleEndpoint,
+        poolsideEndpoint = this[KEY_POOLSIDE_ENDPOINT] ?: DEFAULTS.poolsideEndpoint,
         customEndpoint = this[KEY_CUSTOM_ENDPOINT] ?: DEFAULTS.customEndpoint,
         localModelPath = this[KEY_LOCAL_MODEL_PATH] ?: DEFAULTS.localModelPath,
         localContextSize = this[KEY_LOCAL_CONTEXT_SIZE] ?: DEFAULTS.localContextSize,
@@ -134,6 +150,7 @@ class DataStoreSettingsRepository(
     )
 
     private companion object {
+        /** Prefix legacy (versi <1.5); dipertahankan hanya untuk migrasi baca. */
         const val API_KEY_PREFIX = "API_KEY_"
     }
 }

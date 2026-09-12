@@ -19,6 +19,7 @@ data class AppSettings(
     val openaiEndpoint: String = "https://api.openai.com/v1",
     val anthropicEndpoint: String = "https://api.anthropic.com",
     val googleEndpoint: String = "https://generativelanguage.googleapis.com",
+    val poolsideEndpoint: String = "https://inference.poolside.ai/v1",
     val customEndpoint: String = "",
     // AI lokal on-device (llama.cpp / GGUF)
     val localModelPath: String = "",

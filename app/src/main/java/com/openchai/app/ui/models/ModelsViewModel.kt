@@ -17,8 +17,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
- * ViewModel screen Models: katalog GGUF (unduh/cancel), impor/ekspor file GGUF,
- * model terpasang (Use/Delete), dan rekomendasi berdasarkan RAM perangkat.
+ * ViewModel screen Models: katalog GGUF (unduh/pause/resume/cancel), impor/ekspor
+ * file GGUF, model terpasang (Use/Export/Delete), dan rekomendasi RAM perangkat.
  */
 class ModelsViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -34,6 +34,10 @@ class ModelsViewModel(app: Application) : AndroidViewModel(app) {
     /** Status transfer impor/ekspor (null = idle; dibagikan dari [ModelManager]). */
     val transferState: StateFlow<ModelManager.TransferState?> = manager.transferState
 
+    /** Ukuran part unduhan yang bisa dilanjutkan per model id (id → byte tersimpan). */
+    private val _resumable = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val resumable: StateFlow<Map<String, Long>> = _resumable.asStateFlow()
+
     private val _catalog = MutableStateFlow<List<ModelManager.CatalogModel>>(emptyList())
     val catalog: StateFlow<List<ModelManager.CatalogModel>> = _catalog.asStateFlow()
 
@@ -42,13 +46,20 @@ class ModelsViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         refresh()
+        // Sinkronkan daftar part resumable tiap status unduhan berubah. Collect
+        // pada StateFlow langsung memancarkan nilai awal → part tertinggal
+        // setelah proses mati langsung terdeteksi tanpa menunggu event baru.
+        viewModelScope.launch(Dispatchers.IO) {
+            manager.downloadStates.collect { _resumable.value = manager.resumableSizes() }
+        }
     }
 
-    /** Muat ulang katalog + daftar model terpasang. */
+    /** Muat ulang katalog + daftar model terpasang + part resumable. */
     fun refresh() {
         viewModelScope.launch(Dispatchers.IO) {
             _catalog.value = manager.catalog()
             _installed.value = manager.installedModels()
+            _resumable.value = manager.resumableSizes()
         }
     }
 
@@ -66,6 +77,9 @@ class ModelsViewModel(app: Application) : AndroidViewModel(app) {
     fun cancelDownload(id: String) {
         manager.cancelDownload(id)
     }
+
+    /** Jeda unduhan [id] (part + meta dipertahankan; Resume = download lagi). */
+    fun pauseDownload(id: String) = manager.pauseDownload(id)
 
     /** Impor model GGUF dari SAF uri; daftar terpasang di-refresh saat sukses. */
     fun importModel(uri: Uri) {

@@ -26,12 +26,18 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
 /**
- * Provider kompatibel OpenAI — dipakai untuk OPENAI (api.openai.com) dan CUSTOM
- * (endpoint apa pun dengan API chat-completions gaya OpenAI).
- * - listModels : GET /models → data[].id (bila 404/401/403 → coba /v1/models)
+ * Provider kompatibel OpenAI — dipakai untuk OPENAI (api.openai.com), POOLSIDE
+ * (inference.poolside.ai), dan CUSTOM (endpoint apa pun dengan API
+ * chat-completions gaya OpenAI).
+ * - listModels : GET /models → data[].id (bila 404/401/403 → coba /v1/models);
+ *   field opsional (name/owned_by/context_length/description gaya Poolside)
+ *   dipakai bila ada, absen → aman (name = id, details = owned_by).
  * - test       : kandidat /models yang sama, 2xx sehat; semua 404 → fallback GET base
  * - streamChat : POST /chat/completions, SSE, delta.content, "[DONE]" menutup stream.
- * API key dibaca dari [SecureStore] dengan kunci "OPENAI"/"CUSTOM".
+ *   Field tambahan seperti delta.reasoning_content (Poolside) diabaikan otomatis
+ *   karena hanya delta.content yang dibaca.
+ * API key dibaca dari [SecureStore] dengan kunci providerId.name
+ * ("OPENAI"/"POOLSIDE"/"CUSTOM").
  */
 class OpenAiCompatProvider(
     private val settings: SettingsRepository,
@@ -40,8 +46,11 @@ class OpenAiCompatProvider(
     private val defaultBaseUrl: String
 ) : AiProvider {
 
-    override val displayName: String =
-        if (providerId == ProviderId.CUSTOM) "Custom" else "OpenAI"
+    override val displayName: String = when (providerId) {
+        ProviderId.CUSTOM -> "Custom"
+        ProviderId.POOLSIDE -> "Poolside"
+        else -> "OpenAI"
+    }
 
     /**
      * Cache key terakhir yang dibaca agar [isConfigured] (non-suspend) bisa menjawab
@@ -52,7 +61,11 @@ class OpenAiCompatProvider(
 
     private fun baseUrl(): String {
         val s = settings.settings.value
-        val configured = if (providerId == ProviderId.CUSTOM) s.customEndpoint else s.openaiEndpoint
+        val configured = when (providerId) {
+            ProviderId.CUSTOM -> s.customEndpoint
+            ProviderId.POOLSIDE -> s.poolsideEndpoint
+            else -> s.openaiEndpoint
+        }
         return configured.ifBlank { defaultBaseUrl }.trim().trimEnd('/')
     }
 
@@ -116,13 +129,24 @@ class OpenAiCompatProvider(
         return data.mapNotNull { el ->
             val m = el as? JsonObject ?: return@mapNotNull null
             val id = m.jsonStr("id") ?: return@mapNotNull null
+            // Parsing diperkaya untuk /v1/models gaya Poolside: field opsional
+            // name, owned_by, context_length, description. OpenAI tidak menyediakan
+            // field itu → name = id, details = owned_by (perilaku lama tetap utuh).
+            val name = m.jsonStr("name")?.takeIf { it.isNotBlank() } ?: id
+            val details = listOfNotNull(
+                m.jsonStr("owned_by"),
+                (m["context_length"] as? JsonPrimitive)
+                    ?.takeIf { it !is JsonNull }
+                    ?.content?.toLongOrNull()?.let { "ctx $it" },
+                m.jsonStr("description")?.take(80)
+            ).joinToString(" · ").ifBlank { null }
             ModelInfo(
                 id = id,
-                name = id,
+                name = name,
                 providerId = providerId,
                 providerName = displayName,
                 isLocal = false,
-                details = m.jsonStr("owned_by")
+                details = details
             )
         }.sortedBy { it.id }
     }

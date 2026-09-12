@@ -19,6 +19,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -54,6 +55,9 @@ private val DownloadHttp: OkHttpClient = OkHttpClient.Builder()
  * Katalog + manajemen model GGUF on-device:
  *  - katalog dibaca dari assets "models.json" (kotlinx.serialization),
  *  - unduhan streaming OkHttp ke "<id>.part" lalu di-rename "<id>.gguf",
+ *  - pause/resume via HTTP Range + sidecar "<id>.meta.json" (url/ETag/total):
+ *    [pauseDownload] menjeda & menyimpan part, memanggil [download] lagi =
+ *    lanjut dari offset terakhir, [cancelDownload] = discard penuh,
  *  - progress dipublikasikan lewat [downloadStates] (StateFlow per model id),
  *  - cancel via [cancelDownload] (flag AtomicBoolean + call.cancel()),
  *  - impor/ekspor file GGUF via SAF (importModel/exportModel) → [transferState].
@@ -72,8 +76,8 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
         val description: String
     )
 
-    /** Fase unduhan satu model. */
-    enum class DownloadPhase { IDLE, DOWNLOADING, DONE, FAILED }
+    /** Fase unduhan satu model (PAUSED = dijeda user; part + meta dipertahankan). */
+    enum class DownloadPhase { IDLE, DOWNLOADING, PAUSED, DONE, FAILED }
 
     /** Snapshot status unduhan satu model. */
     data class DownloadState(
@@ -82,6 +86,21 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
         val totalBytes: Long = 0L,
         val error: String? = null
     )
+
+    /**
+     * Sidecar metadata unduhan ("<id>.meta.json") untuk integritas resume:
+     * url sumber, ETag server (dikirim ulang sebagai If-Range), dan total byte
+     * konten (deteksi sumber berubah sejak pause).
+     */
+    @Serializable
+    data class DownloadMeta(
+        val url: String,
+        val etag: String? = null,
+        val totalBytes: Long = 0L
+    )
+
+    /** Sinyal internal pause (bukan error): ditangkap khusus oleh job download. */
+    private class PauseSignal : Exception()
 
     /** Fase transfer file model (impor/ekspor). */
     enum class TransferPhase { RUNNING, DONE, FAILED }
@@ -102,6 +121,7 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
 
     private val jobs = ConcurrentHashMap<String, Job>()
     private val cancelFlags = ConcurrentHashMap<String, AtomicBoolean>()
+    private val pauseFlags = ConcurrentHashMap<String, AtomicBoolean>()
     private val calls = ConcurrentHashMap<String, okhttp3.Call>()
 
     // ----------------------------------------------------------------------
@@ -123,17 +143,35 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
     // Unduhan
     // ----------------------------------------------------------------------
 
-    /** Mulai unduh [model] (abaikan bila sudah berjalan). Progress → [downloadStates]. */
+    /**
+     * Mulai / lanjutkan unduh [model] (abaikan bila sudah berjalan). Bila ada
+     * "<id>.part" tersisa (pause / gagal / proses mati), unduhan otomatis
+     * dilanjutkan dari offset terakhir (HTTP Range). Progress → [downloadStates].
+     */
     fun download(model: CatalogModel) {
         if (jobs.containsKey(model.id)) return
         val cancelled = AtomicBoolean(false)
         cancelFlags[model.id] = cancelled
+        val paused = AtomicBoolean(false)
+        pauseFlags[model.id] = paused
         jobs[model.id] = scope.launch(Dispatchers.IO) {
-            setDownloadState(model.id, DownloadState(DownloadPhase.DOWNLOADING, 0L, model.sizeBytes))
+            // Emit awal: bila part lama ada (resume), tampilkan offset tersimpan
+            // sejak frame pertama, bukan 0 (di Dispatchers.IO — aman baca file).
+            val existing = partFile(model.id)
+            val resumeFrom = if (existing.isFile) existing.length() else 0L
+            val resumeTotal =
+                if (resumeFrom > 0L) readMeta(model.id)?.totalBytes?.takeIf { it > 0 }
+                    ?: model.sizeBytes
+                else model.sizeBytes
+            setDownloadState(
+                model.id,
+                DownloadState(DownloadPhase.DOWNLOADING, resumeFrom, resumeTotal)
+            )
             try {
-                doDownload(model, cancelled)
+                doDownload(model, cancelled, paused)
                 if (cancelled.get()) {
                     removePartFile(model.id)
+                    deleteMeta(model.id)
                     setDownloadState(model.id, DownloadState())
                 } else {
                     val file = downloadedFile(model.id)
@@ -142,40 +180,104 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
                         DownloadState(DownloadPhase.DONE, file.length(), file.length())
                     )
                 }
+            } catch (sig: PauseSignal) {
+                // Pause eksplisit: part + meta DIPERTAHANKAN agar Resume bisa
+                // lanjut dari offset terakhir.
+                emitPaused(model)
             } catch (ce: CancellationException) {
-                removePartFile(model.id)
-                setDownloadState(model.id, DownloadState())
+                if (paused.get()) {
+                    // pauseDownload() membatalkan job → perlakukan sebagai pause
+                    // (part + meta dipertahankan).
+                    emitPaused(model)
+                } else {
+                    // Cancel lama = "Discard": part + meta dihapus, kembali IDLE.
+                    removePartFile(model.id)
+                    deleteMeta(model.id)
+                    setDownloadState(model.id, DownloadState())
+                }
                 throw ce
             } catch (e: Exception) {
-                removePartFile(model.id)
-                if (cancelled.get()) {
-                    // Dibatalkan user (flag/call.cancel) → kembali IDLE, bukan gagal.
-                    setDownloadState(model.id, DownloadState())
-                } else {
-                    setDownloadState(
-                        model.id,
-                        DownloadState(
-                            state = DownloadPhase.FAILED,
-                            error = e.message ?: "Download failed"
+                when {
+                    // call.cancel() saat pause memicu IOException di read blocking
+                    // → cek flag pause lebih dulu sebelum dianggap gagal.
+                    paused.get() -> emitPaused(model)
+                    cancelled.get() -> {
+                        // Dibatalkan user (flag/call.cancel) → IDLE + discard.
+                        removePartFile(model.id)
+                        deleteMeta(model.id)
+                        setDownloadState(model.id, DownloadState())
+                    }
+                    else -> {
+                        // Gagal (jaringan/dll): part + meta DIPERTAHANKAN agar
+                        // Retry → download() otomatis resume dari offset terakhir.
+                        setDownloadState(
+                            model.id,
+                            DownloadState(
+                                state = DownloadPhase.FAILED,
+                                error = e.message ?: "Download failed"
+                            )
                         )
-                    )
+                    }
                 }
             } finally {
                 jobs.remove(model.id)
                 calls.remove(model.id)
                 cancelFlags.remove(model.id)
+                pauseFlags.remove(model.id)
             }
         }
     }
 
-    /** Batalkan unduhan [id] (flag + call.cancel(); part file dibersihkan oleh job). */
-    fun cancelDownload(id: String) {
-        cancelFlags[id]?.set(true)
+    /**
+     * Jeda unduhan [id]: set flag pause lalu cancel call/job. Part + meta
+     * DIPERTAHANKAN — lanjutkan dengan memanggil [download] lagi (auto-resume).
+     */
+    fun pauseDownload(id: String) {
+        if (!jobs.containsKey(id)) return
+        pauseFlags.getOrPut(id) { AtomicBoolean(false) }.set(true)
         calls[id]?.cancel()
         jobs[id]?.cancel()
     }
 
-    private suspend fun doDownload(model: CatalogModel, cancelled: AtomicBoolean) {
+    /**
+     * Discard penuh unduhan [id]: bila job masih berjalan → flag + call.cancel()
+     * dan job membersihkan part + meta; bila tidak ada job (PAUSED / part
+     * tertinggal setelah proses mati) → hapus part + meta langsung, status IDLE.
+     */
+    fun cancelDownload(id: String) {
+        cancelFlags[id]?.set(true)
+        calls[id]?.cancel()
+        val job = jobs[id]
+        if (job != null) {
+            job.cancel()
+        } else {
+            removePartFile(id)
+            deleteMeta(id)
+            _downloadStates.value = _downloadStates.value - id
+        }
+    }
+
+    /**
+     * Ukuran part yang bisa dilanjutkan per model id (scan "*.part" di [dir] →
+     * id → byte tersimpan). Dipakai UI untuk menawarkan Resume setelah proses
+     * mati (state unduhan hilang tapi part masih ada). Sinkron dan murah.
+     */
+    fun resumableSizes(): Map<String, Long> =
+        dir.listFiles { f -> f.isFile && f.name.endsWith(".part") }
+            ?.associate { f -> f.name.removeSuffix(".part") to f.length() }
+            ?: emptyMap()
+
+    /**
+     * Inti unduhan dengan dukungan resume HTTP Range:
+     *  - part lama + meta cocok → request "Range: bytes=<offset>-" (plus
+     *    "If-Range: <etag>" bila ada) → 206 → APPEND dari offset;
+     *  - server jawab 200 (Range diabaikan / If-Range mismatch) → part
+     *    di-truncate dan ditulis ulang dari nol;
+     *  - 416 + part persis selengkap meta.totalBytes → langsung finalisasi;
+     *  - 416 lain / total Content-Range ≠ meta.totalBytes → part dibuang dan
+     *    GET biasa diulang dari nol (loop restart, dibatasi MAX_HTTP_RESTARTS).
+     */
+    private suspend fun doDownload(model: CatalogModel, cancelled: AtomicBoolean, paused: AtomicBoolean) {
         dir.mkdirs()
         // Cek ruang kosong: butuh ~1.2× ukuran model (file + margin rename/write).
         if (model.sizeBytes > 0L) {
@@ -188,56 +290,187 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
             }
         }
 
-        val request = Request.Builder().url(model.url).build()
-        val call = DownloadHttp.newCall(request)
-        calls[model.id] = call
+        var attempt = 0
+        while (true) {
+            attempt++
+            var restartRequested = false
 
-        call.execute().use { resp ->
-            if (cancelled.get()) throw IOException("Download cancelled")
-            if (!resp.isSuccessful) {
-                throw IOException("HTTP ${resp.code} while downloading ${model.name}")
-            }
-            val body = resp.body ?: throw IOException("Empty response body")
-            val total = body.contentLength().takeIf { it > 0 } ?: model.sizeBytes
             val part = partFile(model.id)
-            var progress = 0L
-            var lastEmit = 0L
-
-            body.byteStream().use { input ->
-                part.outputStream().use { output ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    while (true) {
-                        if (cancelled.get()) throw IOException("Download cancelled")
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        output.write(buffer, 0, read)
-                        progress += read
-                        // Update progress per chunk, di-throttle ~200 ms agar
-                        // StateFlow tidak membanjiri recomposition UI.
-                        val now = System.nanoTime() / 1_000_000L
-                        if (now - lastEmit >= PROGRESS_INTERVAL_MS) {
-                            lastEmit = now
-                            setDownloadState(
-                                model.id,
-                                DownloadState(DownloadPhase.DOWNLOADING, progress, total)
-                            )
-                        }
-                    }
-                    output.flush()
-                    setDownloadState(
-                        model.id,
-                        DownloadState(DownloadPhase.DOWNLOADING, progress, if (total > 0) total else progress)
-                    )
+            var startOffset = 0L
+            var meta: DownloadMeta? = null
+            if (part.isFile && part.length() > 0L) {
+                val saved = readMeta(model.id)
+                if (saved != null && saved.url != model.url) {
+                    // Sumber berubah sejak part ditulis → part tak bisa dipercaya.
+                    removePartFile(model.id)
+                    deleteMeta(model.id)
+                } else {
+                    startOffset = part.length()
+                    meta = saved
                 }
             }
 
-            // Finalisasi: rename "<id>.part" → "<id>.gguf".
-            val target = downloadedFile(model.id)
-            if (target.exists()) target.delete()
-            if (!part.renameTo(target)) {
-                throw IOException("Failed to finalize download of ${model.name}")
+            val request = Request.Builder().url(model.url).apply {
+                if (startOffset > 0L) {
+                    header("Range", "bytes=$startOffset-")
+                    meta?.etag?.let { header("If-Range", it) }
+                }
+            }.build()
+            val call = DownloadHttp.newCall(request)
+            calls[model.id] = call
+
+            try {
+                call.execute().use { resp ->
+                    if (paused.get()) throw PauseSignal()
+                    if (cancelled.get()) throw IOException("Download cancelled")
+                    val code = resp.code
+                    val body = resp.body
+                    when {
+                        // 416 + part persis selengkap total tersimpan → unduhan
+                        // sempat selesai tepat saat pause; finalisasi langsung.
+                        code == 416 &&
+                            meta != null && meta.totalBytes > 0L &&
+                            part.length() == meta.totalBytes -> finalizeDownload(model)
+
+                        // 416 lainnya: offset tidak valid / part korup → buang,
+                        // ulangi GET biasa dari nol.
+                        code == 416 -> {
+                            removePartFile(model.id)
+                            deleteMeta(model.id)
+                            restartRequested = true
+                        }
+
+                        // 206 Partial Content: server menghormati Range → APPEND.
+                        code == 206 && startOffset > 0L -> {
+                            val declaredTotal = parseContentRangeTotal(resp.header("Content-Range"))
+                            if (meta != null && meta.totalBytes > 0L &&
+                                declaredTotal != null && declaredTotal != meta.totalBytes
+                            ) {
+                                // Isi sumber berubah sejak pause (total ≠ meta)
+                                // → part basi, buang dan mulai ulang dari nol.
+                                removePartFile(model.id)
+                                deleteMeta(model.id)
+                                restartRequested = true
+                            } else {
+                                copyBodyToFile(
+                                    model, resp,
+                                    body ?: throw IOException("Empty response body"),
+                                    part, startOffset, meta, append = true, cancelled, paused
+                                )
+                            }
+                        }
+
+                        // 200 (atau 2xx lain): server abaikan Range / If-Range
+                        // mismatch → truncate part, tulis ulang dari nol.
+                        resp.isSuccessful -> copyBodyToFile(
+                            model, resp,
+                            body ?: throw IOException("Empty response body"),
+                            part, 0L, null, append = false, cancelled, paused
+                        )
+
+                        else -> throw IOException("HTTP $code while downloading ${model.name}")
+                    }
+                }
+            } catch (e: IOException) {
+                // call.cancel() (pause maupun cancel) memicu IOException di read
+                // blocking: bedakan pause → cancel → error asli.
+                if (paused.get()) throw PauseSignal()
+                if (cancelled.get()) throw IOException("Download cancelled")
+                throw e
+            }
+
+            if (!restartRequested) break
+            if (attempt >= MAX_HTTP_RESTARTS) {
+                throw IOException("Server response kept changing while downloading ${model.name}")
             }
         }
+    }
+
+    /**
+     * Copy body respons ke part file (append bila resume dari offset), simpan
+     * meta sidecar SEBELUM copy, emit progress per chunk (throttle), lalu
+     * finalisasi (rename "<id>.part" → "<id>.gguf").
+     */
+    private fun copyBodyToFile(
+        model: CatalogModel,
+        resp: okhttp3.Response,
+        body: okhttp3.ResponseBody,
+        part: File,
+        startOffset: Long,
+        meta: DownloadMeta?,
+        append: Boolean,
+        cancelled: AtomicBoolean,
+        paused: AtomicBoolean
+    ) {
+        val contentLength = body.contentLength()
+        val total = when {
+            resp.code == 206 ->
+                contentLength.takeIf { it > 0 }?.let { it + startOffset }
+                    ?: meta?.totalBytes?.takeIf { it > 0 }
+                    ?: model.sizeBytes
+            else -> contentLength.takeIf { it > 0 } ?: model.sizeBytes
+        }
+
+        // Simpan meta sebelum copy agar pause/proses mati kapan pun bisa resume
+        // dengan total & ETag yang konsisten dengan part yang sudah tertulis.
+        writeMeta(
+            model.id,
+            DownloadMeta(url = model.url, etag = resp.header("ETag"), totalBytes = total)
+        )
+
+        // Emit awal: saat resume, progress mulai dari startOffset (bukan 0).
+        setDownloadState(model.id, DownloadState(DownloadPhase.DOWNLOADING, startOffset, total))
+
+        var progress = startOffset
+        var lastEmit = 0L
+        body.byteStream().use { input ->
+            FileOutputStream(part, append).use { output ->
+                val buffer = ByteArray(BUFFER_SIZE)
+                while (true) {
+                    // Cek flag per chunk: pause dulu, baru cancel.
+                    if (paused.get()) throw PauseSignal()
+                    if (cancelled.get()) throw IOException("Download cancelled")
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    output.write(buffer, 0, read)
+                    progress += read
+                    // Update progress per chunk, di-throttle ~200 ms agar
+                    // StateFlow tidak membanjiri recomposition UI.
+                    val now = System.nanoTime() / 1_000_000L
+                    if (now - lastEmit >= PROGRESS_INTERVAL_MS) {
+                        lastEmit = now
+                        setDownloadState(
+                            model.id,
+                            DownloadState(DownloadPhase.DOWNLOADING, progress, total)
+                        )
+                    }
+                }
+                output.flush()
+                setDownloadState(
+                    model.id,
+                    DownloadState(DownloadPhase.DOWNLOADING, progress, if (total > 0) total else progress)
+                )
+            }
+        }
+
+        finalizeDownload(model)
+    }
+
+    /** Finalisasi unduhan: rename "<id>.part" → "<id>.gguf" + bersihkan meta. */
+    private fun finalizeDownload(model: CatalogModel) {
+        val part = partFile(model.id)
+        val target = downloadedFile(model.id)
+        if (target.exists()) target.delete()
+        if (!part.renameTo(target)) {
+            throw IOException("Failed to finalize download of ${model.name}")
+        }
+        deleteMeta(model.id)
+    }
+
+    /** Parse header "Content-Range: bytes 100-999/1234" → 1234 (null bila "*"/rusak). */
+    private fun parseContentRangeTotal(value: String?): Long? {
+        if (value == null) return null
+        return value.substringAfterLast('/').trim().toLongOrNull()
     }
 
     // ----------------------------------------------------------------------
@@ -390,11 +623,12 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
             ?.sortedBy { it.name }
             ?: emptyList()
 
-    /** Hapus model [id] (unduhan berjalan juga dibatalkan). */
+    /** Hapus model [id] (unduhan berjalan dibatalkan; part + meta ikut dibersihkan). */
     fun delete(id: String) {
         cancelDownload(id)
         downloadedFile(id).delete()
         partFile(id).delete()
+        deleteMeta(id)
         _downloadStates.value = _downloadStates.value - id
     }
 
@@ -438,6 +672,19 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
     // Helpers
     // ----------------------------------------------------------------------
 
+    /** Emit status PAUSED dengan progress terakhir (part + meta dipertahankan). */
+    private fun emitPaused(model: CatalogModel) {
+        val part = partFile(model.id)
+        setDownloadState(
+            model.id,
+            DownloadState(
+                state = DownloadPhase.PAUSED,
+                progressBytes = if (part.isFile) part.length() else 0L,
+                totalBytes = readMeta(model.id)?.totalBytes?.takeIf { it > 0 } ?: model.sizeBytes
+            )
+        )
+    }
+
     private fun setDownloadState(id: String, state: DownloadState) {
         _downloadStates.value = _downloadStates.value + (id to state)
     }
@@ -479,6 +726,25 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
 
     private fun downloadedFile(id: String) = File(dir, "$id.gguf")
 
+    private fun metaFile(id: String) = File(dir, "$id.meta.json")
+
+    /** Baca meta sidecar resume (null bila tidak ada / JSON korup). */
+    private fun readMeta(id: String): DownloadMeta? = runCatching {
+        val file = metaFile(id)
+        if (!file.isFile) return@runCatching null
+        json.decodeFromString<DownloadMeta>(file.readText())
+    }.getOrNull()
+
+    /** Tulis meta sidecar resume (url + ETag + total byte). */
+    private fun writeMeta(id: String, meta: DownloadMeta) {
+        metaFile(id).writeText(json.encodeToString(DownloadMeta.serializer(), meta))
+    }
+
+    /** Hapus meta sidecar resume (abaikan bila tidak ada). */
+    private fun deleteMeta(id: String) {
+        metaFile(id).delete()
+    }
+
     private fun removePartFile(id: String) {
         partFile(id).delete()
     }
@@ -487,6 +753,9 @@ class ModelManager(private val context: Context, private val scope: CoroutineSco
         const val CATALOG_ASSET = "models.json"
         const val BUFFER_SIZE = 64 * 1024
         const val PROGRESS_INTERVAL_MS = 200L
+
+        /** Batas restart GET biasa bila respons server tak cocok dengan part. */
+        const val MAX_HTTP_RESTARTS = 3
 
         /** Magic bytes "GGUF" (0x47 0x47 0x55 0x46) untuk validasi file impor. */
         val GGUF_MAGIC = byteArrayOf(0x47, 0x47, 0x55, 0x46)

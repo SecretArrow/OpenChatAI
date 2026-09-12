@@ -47,7 +47,9 @@ data class Project(
     val lastOpenedAt: Long = System.currentTimeMillis()
 )
 
-enum class ProviderId { OLLAMA, OPENAI, ANTHROPIC, GOOGLE, CUSTOM, LOCAL }
+// CATATAN: JANGAN ubah urutan entri lama — ordinal dipakai serialisasi
+// (DataStore menyimpan `name`, tapi kontrak tetap: tambahan hanya di akhir).
+enum class ProviderId { OLLAMA, OPENAI, ANTHROPIC, GOOGLE, CUSTOM, LOCAL, POOLSIDE }
 
 data class ModelInfo(
     val id: String,

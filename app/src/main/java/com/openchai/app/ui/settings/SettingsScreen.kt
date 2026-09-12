@@ -110,6 +110,18 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                             )
                         }
                     }
+                    // Preset cepat Poolside (inference.poolside.ai — coding model
+                    // laguna, API kompatibel OpenAI; key tersimpan di SecureStore).
+                    if (provider == ProviderId.POOLSIDE) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AssistChip(
+                                onClick = {
+                                    vm.update { copyEndpoint(it, provider, POOLSIDE_PRESET_ENDPOINT) }
+                                },
+                                label = { Text("Preset: Poolside") }
+                            )
+                        }
+                    }
                     var apiKeyInput by remember(provider) { mutableStateOf("") }
                     OutlinedTextField(
                         value = apiKeyInput,
@@ -357,6 +369,7 @@ private fun ProviderChips(selected: ProviderId, onSelect: (ProviderId) -> Unit) 
         ProviderId.OPENAI to "OpenAI",
         ProviderId.ANTHROPIC to "Claude",
         ProviderId.GOOGLE to "Gemini",
+        ProviderId.POOLSIDE to "Poolside",
         ProviderId.CUSTOM to "Custom"
     )
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -513,6 +526,9 @@ private fun RuntimeRow(name: String, ok: Boolean, detail: String) {
 private fun agentRouterEndpoint(provider: ProviderId): String = when (provider) {
     ProviderId.ANTHROPIC -> "https://agentrouter.org"
     ProviderId.OPENAI, ProviderId.CUSTOM -> "https://agentrouter.org/v1"
+    // POOLSIDE bukan target AgentRouter — chip ini tidak tampil untuk Poolside;
+    // fallback ke endpoint-nya sendiri agar tidak pernah salah set endpoint.
+    ProviderId.POOLSIDE -> POOLSIDE_PRESET_ENDPOINT
     else -> "https://agentrouter.org"
 }
 
@@ -521,6 +537,7 @@ private fun endpointOf(settings: AppSettings, provider: ProviderId): String = wh
     ProviderId.OPENAI -> settings.openaiEndpoint
     ProviderId.ANTHROPIC -> settings.anthropicEndpoint
     ProviderId.GOOGLE -> settings.googleEndpoint
+    ProviderId.POOLSIDE -> settings.poolsideEndpoint
     ProviderId.CUSTOM -> settings.customEndpoint
     // LOCAL tidak pakai endpoint — tampilkan path model GGUF aktif.
     ProviderId.LOCAL -> settings.localModelPath
@@ -532,7 +549,11 @@ private fun copyEndpoint(settings: AppSettings, provider: ProviderId, value: Str
         ProviderId.OPENAI -> settings.copy(openaiEndpoint = value)
         ProviderId.ANTHROPIC -> settings.copy(anthropicEndpoint = value)
         ProviderId.GOOGLE -> settings.copy(googleEndpoint = value)
+        ProviderId.POOLSIDE -> settings.copy(poolsideEndpoint = value)
         ProviderId.CUSTOM -> settings.copy(customEndpoint = value)
         // LOCAL: edit manual path GGUF (alternatif tombol "Use" di screen Models).
         ProviderId.LOCAL -> settings.copy(localModelPath = value)
     }
+
+/** Preset endpoint Poolside (sama dengan default poolsideEndpoint di AppSettings). */
+private const val POOLSIDE_PRESET_ENDPOINT = "https://inference.poolside.ai/v1"

@@ -59,7 +59,9 @@ import java.io.File
  *  - Banner rekomendasi model sesuai RAM perangkat.
  *  - Impor file GGUF dari penyimpanan (SAF OpenDocument) + indikator transfer.
  *  - Daftar model terpasang: tombol "Use" / "Export" (SAF CreateDocument) / "Delete".
- *  - Katalog GGUF: tombol Download dengan progress MB + Cancel / Retry.
+ *  - Katalog GGUF: tombol Download; saat berjalan progress MB + Pause; saat
+ *    dijeda Resume/Discard; Retry otomatis melanjutkan dari part tersisa;
+ *    part tertinggal setelah proses mati ditawarkan "Resume (ukuran)".
  */
 @Composable
 fun ModelsScreen(
@@ -70,6 +72,7 @@ fun ModelsScreen(
     val catalog by vm.catalog.collectAsStateWithLifecycle()
     val installed by vm.installed.collectAsStateWithLifecycle()
     val downloads by vm.downloadStates.collectAsStateWithLifecycle()
+    val resumable by vm.resumable.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
     val transfer by vm.transferState.collectAsStateWithLifecycle()
 
@@ -220,7 +223,9 @@ fun ModelsScreen(
                         model = model,
                         state = downloads[model.id],
                         isInstalled = installed.any { it.name == "${model.id}.gguf" },
+                        resumableBytes = resumable[model.id],
                         onDownload = { vm.download(model) },
+                        onPause = { vm.pauseDownload(model.id) },
                         onCancel = { vm.cancelDownload(model.id) }
                     )
                 }
@@ -370,13 +375,22 @@ private fun InstalledRow(
     }
 }
 
-/** Baris katalog: info model + aksi Download / progress+Cancel / Retry / Installed. */
+/**
+ * Baris katalog: info model + matriks aksi unduhan:
+ *  - DOWNLOADING → progress bar + "x / y" + Pause,
+ *  - PAUSED → Resume + "Paused · x / y" + Discard (buang part),
+ *  - FAILED → Retry (auto-resume dari part) + pesan error,
+ *  - ada part tapi tanpa state aktif (proses mati) → Resume (ukuran) + Discard,
+ *  - terpasang → "Installed ✓"; selain itu → Download.
+ */
 @Composable
 private fun CatalogRow(
     model: ModelManager.CatalogModel,
     state: ModelManager.DownloadState?,
     isInstalled: Boolean,
+    resumableBytes: Long?,
     onDownload: () -> Unit,
+    onPause: () -> Unit,
     onCancel: () -> Unit
 ) {
     ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
@@ -420,7 +434,20 @@ private fun CatalogRow(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
                         )
-                        TextButton(onClick = onCancel) { Text("Cancel") }
+                        TextButton(onClick = onPause) { Text("Pause") }
+                    }
+                }
+
+                st != null && st.state == ModelManager.DownloadPhase.PAUSED -> {
+                    Text(
+                        "Paused · ${humanBytes(st.progressBytes)} / ${humanBytes(st.totalBytes)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = onDownload) { Text("Resume") }
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(onClick = onCancel) { Text("Discard") }
                     }
                 }
 
@@ -430,6 +457,7 @@ private fun CatalogRow(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error
                     )
+                    // Retry memanggil download lagi — part tersisa dipakai resume.
                     Button(onClick = onDownload) { Text("Retry") }
                 }
 
@@ -439,6 +467,18 @@ private fun CatalogRow(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
+                }
+
+                // Proses mati saat mengunduh: state hilang tapi part masih ada
+                // → tawarkan lanjutkan unduhan (ukuran part dalam kurung).
+                resumableBytes != null && resumableBytes > 0L -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Button(onClick = onDownload) {
+                            Text("Resume (${humanBytes(resumableBytes)})")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(onClick = onCancel) { Text("Discard") }
+                    }
                 }
 
                 else -> {

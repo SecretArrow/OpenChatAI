@@ -51,6 +51,7 @@ private val PROVIDER_ORDER = listOf(
     ProviderRow(ProviderId.OPENAI, "OpenAI", "Cloud"),
     ProviderRow(ProviderId.ANTHROPIC, "Claude", "Cloud"),
     ProviderRow(ProviderId.GOOGLE, "Google Gemini", "Cloud"),
+    ProviderRow(ProviderId.POOLSIDE, "Poolside", "Cloud"),
     ProviderRow(ProviderId.CUSTOM, "Custom (OpenAI-compatible)", "Cloud")
 )
 

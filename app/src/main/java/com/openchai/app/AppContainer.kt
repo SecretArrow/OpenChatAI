@@ -64,6 +64,7 @@ class AppContainer(context: Context) {
         openai = OpenAiCompatProvider(settingsRepository, secureStore, ProviderId.OPENAI, "https://api.openai.com/v1"),
         anthropic = AnthropicProvider(settingsRepository, secureStore),
         google = GoogleProvider(settingsRepository, secureStore),
+        poolside = OpenAiCompatProvider(settingsRepository, secureStore, ProviderId.POOLSIDE, "https://inference.poolside.ai/v1"),
         custom = OpenAiCompatProvider(settingsRepository, secureStore, ProviderId.CUSTOM, ""),
         local = LocalLlamaProvider(context, settingsRepository, llamaEngine, modelManager)
     )
