@@ -3,8 +3,8 @@ package com.openchai.runtime
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
-import com.openchai.app.OpenChatApp
-import com.openchai.app.runtime.ProcessService
+import com.openchatai.app.OpenChatApp
+import com.openchatai.app.runtime.ProcessService
 import com.openchai.core.agent.CommandResult
 import com.openchai.core.agent.CommandRunner
 import com.openchai.core.runtime.ManagedProcess

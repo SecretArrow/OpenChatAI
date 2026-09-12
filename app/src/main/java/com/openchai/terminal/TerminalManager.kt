@@ -1,7 +1,7 @@
 package com.openchai.terminal
 
 import android.content.Context
-import com.openchai.app.OpenChatApp
+import com.openchatai.app.OpenChatApp
 import com.openchai.core.terminal.TerminalHost
 import com.openchai.core.terminal.TerminalSessionInfo
 import com.openchai.runtime.ShellEnvironment

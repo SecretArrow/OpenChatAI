@@ -6,15 +6,18 @@ plugins {
 }
 
 android {
-    namespace = "com.openchai.app"
+    namespace = "com.openchatai.app"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.openchai.app"
+        applicationId = "com.openchatai.app"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 8
-        versionName = "1.7.0"
+        // targetSdk 28 SENGAJA (standar Termux/UserLAnd): Android 10+ memblokir
+        // execve() binary di app data untuk targetSdk >= 29 — rootfs Linux
+        // (apt/node/python) dieksekusi proot dari app data. compileSdk tetap 34.
+        targetSdk = 28
+        versionCode = 9
+        versionName = "1.8.0"
         vectorDrawables { useSupportLibrary = true }
 
         ndk {
@@ -63,6 +66,9 @@ android {
     }
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/INDEX.LIST")
+        // jniLibs: libproot.so (proot statis prebuilt) JANGAN di-strip AGP —
+        // strip bisa merusak ELF statis + debug info dipakai symbol lookup.
+        jniLibs.keepDebugSymbols += "**/libproot.so"
     }
     lint {
         abortOnError = false
@@ -96,6 +102,9 @@ dependencies {
     // Preferensi + penyimpanan aman
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Ekstraksi tar.gz rootfs Linux (Apache Commons Compress)
+    implementation("org.apache.commons:commons-compress:1.26.2")
 
     // Markdown rendering di chat
     implementation("io.noties.markwon:core:4.6.2")

@@ -1,7 +1,7 @@
 package com.openchai.runtime
 
 import android.content.Context
-import com.openchai.app.OpenChatApp
+import com.openchatai.app.OpenChatApp
 import java.io.File
 
 /**
