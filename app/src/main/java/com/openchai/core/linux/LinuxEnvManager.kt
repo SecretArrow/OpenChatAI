@@ -802,13 +802,53 @@ class LinuxEnvManager(private val context: Context, val scope: CoroutineScope) {
     // Eksekusi proot (satu proses sekali jalan)
     // ------------------------------------------------------------------
 
-    /** Argumen proot standar (format "--rootfs <path>" = dua argumen terpisah). */
-    fun prootArgs(cwdInEnv: String): List<String> = listOf(
-        "--kill-on-exit", "--link2symlink",
-        "--rootfs", rootfsPath().absolutePath,
-        "-0", "-w", cwdInEnv,
-        "-b", "/dev", "-b", "/proc", "-b", "/sys"
-    )
+    /**
+     * Argumen proot standar (format "--rootfs <path>" = dua argumen terpisah).
+     *
+     * [bindHostPath] opsional: bila tidak null/blank DAN merupakan direktori host
+     * yang ada, pasangan "-b <bindHostPath>:/home/user/workspace" ditambahkan
+     * SEBAGAI PASANGAN TERAKHIR. proot memproses bind berurutan sehingga bind
+     * terakhir MENIMPA direktori workspace internal rootfs pada path guest yang
+     * sama — command (agent/terminal/proses latar) berjalan PADA workspace
+     * Android asli, bukan pada salinan di dalam rootfs.
+     */
+    fun prootArgs(cwdInEnv: String, bindHostPath: String? = null): List<String> {
+        val base = listOf(
+            "--kill-on-exit", "--link2symlink",
+            "--rootfs", rootfsPath().absolutePath,
+            "-0", "-w", cwdInEnv,
+            "-b", "/dev", "-b", "/proc", "-b", "/sys"
+        )
+        return if (!bindHostPath.isNullOrBlank() && File(bindHostPath).isDirectory) {
+            base + listOf("-b", "$bindHostPath:/home/user/workspace")
+        } else {
+            base
+        }
+    }
+
+    /**
+     * Petakan path host workspace Android aktif ke path host yang sah untuk
+     * di-bind ke sandbox proot (dipakai [LinuxProcessSupervisor] dan
+     * [LinuxShell]).
+     *
+     * Return null bila [hostPath] null/blank/bukan direktori; selain itu
+     * canonical path (best-effort — fallback absolutePath bila resolusi
+     * canonical gagal, mis. symlink rusak atau IO error).
+     */
+    fun guestWorkspaceBind(hostPath: String?): String? {
+        if (hostPath.isNullOrBlank()) return null
+        val file = File(hostPath)
+        if (!file.isDirectory) return null
+        return try {
+            file.canonicalFile.absolutePath
+        } catch (_: Exception) {
+            try {
+                file.absolutePath
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
 
     /** Variabel lingkungan dasar di dalam userspace Linux. */
     fun envEnvVars(): Map<String, String> = mapOf(
@@ -827,6 +867,9 @@ class LinuxEnvManager(private val context: Context, val scope: CoroutineScope) {
      * Jalankan [command] sekali di dalam userspace Linux via proot:
      * proot <args> /bin/bash -lc "<command>; __oca_rc=$?; echo __OCA_EXIT_<rc>".
      *
+     * [bindHostPath] diteruskan ke [prootArgs] (bind workspace host — lihat
+     * KDoc di sana).
+     *
      * stdout & stderr dibaca paralel (dua thread), masing-masing di-cap
      * [OUTPUT_CAP_BYTES] (sisanya dibuang agar pipe tidak macet). Exit code
      * diambil dari sentinel __OCA_EXIT_<rc> TERAKHIR di stdout; bila sentinel
@@ -836,7 +879,8 @@ class LinuxEnvManager(private val context: Context, val scope: CoroutineScope) {
     fun execOnce(
         command: String,
         cwdInEnv: String = "/home/user/workspace",
-        timeoutMs: Long = 120_000L
+        timeoutMs: Long = 120_000L,
+        bindHostPath: String? = null
     ): CommandResult {
         val proot = prootBinary()
         if (!proot.isFile) {
@@ -845,7 +889,7 @@ class LinuxEnvManager(private val context: Context, val scope: CoroutineScope) {
         // Bungkus command: simpan exit code lalu cetak sentinel.
         val wrapped = command + "; __oca_rc=${'$'}?; echo \"__OCA_EXIT_${'$'}__oca_rc\""
         val argv = mutableListOf(proot.absolutePath)
-        argv.addAll(prootArgs(cwdInEnv))
+        argv.addAll(prootArgs(cwdInEnv, bindHostPath))
         argv.add("/bin/bash")
         argv.add("-lc")
         argv.add(wrapped)

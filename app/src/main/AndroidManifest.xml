@@ -28,6 +28,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Terminal layar penuh (dibuka dari header Chat; bukan bagian task stack eksternal) -->
+        <activity
+            android:name=".ui.terminal.TerminalActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode" />
+
         <service
             android:name=".runtime.ProcessService"
             android:exported="false"

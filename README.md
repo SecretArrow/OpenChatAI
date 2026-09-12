@@ -6,22 +6,24 @@
 
 ![CI](https://github.com/SecretArrow/OpenChatAI/actions/workflows/android-ci.yml/badge.svg)
 
-**Versi terbaru:** v1.8.1 (versionCode 10) · paket `com.openchatai.app` · minSdk 26 · ABI `arm64-v8a` + `x86_64`
+**Versi terbaru:** v1.9.0 (versionCode 11) · paket `com.openchatai.app` · minSdk 26 · ABI `arm64-v8a` + `x86_64`
 
 ## Fitur
 
 ### Chat (fokus utama)
 - Streaming AI response, Markdown, code blocks + syntax layout, copy response/code
+- **Model selector di header chat**: pilih provider + model tanpa membuka Settings, lengkap status koneksi per provider + **tombol Test** untuk menguji model satu klik (hasil/error detail ditampilkan)
+- **Agent actions menu (satu tombol ⚡/tools)**: Fix, Test, Build, Run, Debug, Explain, Review, Commit — chat tetap bersih
+- **Auto-scroll pintar**: mengikuti output terbaru hanya saat user di bagian bawah; scroll ke atas menghentikan paksaan, muncul chip "↓ New messages" untuk kembali
+- **Agent events collapsible**: langkah agent ringkas satu baris; "View execution details" membuka stdout/stderr penuh
 - Regenerate, Retry, Stop generation, Edit message, lanjut percakapan
-- Riwayat percakapan lokal (Today/Yesterday), percakapan per-project
-- **Layar History**: pencarian, pengelompokan Today / Yesterday / Previous 7 days / Older, buka & hapus percakapan
-- **Slash commands**: `/fix`, `/test`, `/commit`, `/explain`, `/review` — satu ketukan mengisi prompt lengkap
+- Riwayat percakapan lokal, percakapan per-project, layar History dengan pencarian
 - **Export chat**: bagikan percakapan sebagai Markdown lewat share sheet Android
-- Auto-scroll pintar, typing indicator, status jaringan & model
+- **Workspace selalu tampil** di header; workspace aktif & model terpilih dipulihkan otomatis saat app dibuka ulang (tanpa restart kedua)
 
 ### AI Provider
 - **On-device (tanpa aplikasi lain!)**: llama.cpp embedded via JNI — 10 model GGUF di katalog (Qwen3.5 0.8B, LFM2 1.2B, Qwen3 0.6B, Llama 3.2 1B, Qwen2.5 0.5B/1.5B Coder, Gemma 2, Phi-3.5 Mini) diunduh langsung dari dalam aplikasi (layar **Models**), inferensi 100% di perangkat, streaming, pause/resume unduhan, import/export file GGUF via SAF → lihat [docs/LOCAL_AI.md](docs/LOCAL_AI.md)
-- **Local**: Ollama (`http://127.0.0.1:11434`) & **Remote Ollama** (mis. `http://192.168.1.100:11434`)
+- **Ollama** (`http://127.0.0.1:11434`) & **Remote Ollama** — dengan **auto-deteksi saat app dibuka**: status Connected / Not running / Connection error selalu terlihat, tombol **Start Ollama** (menjalankan `ollama serve` di sandbox Linux bila terpasang), Retry, dan daftar model **yang benar-benar dikembalikan Ollama** (mis. `qwen3:0.6b` langsung muncul di selector) → lihat [docs/PROVIDERS.md](docs/PROVIDERS.md)
 - **Cloud**: OpenAI, Anthropic (Claude), Google (Gemini), **Poolside**, Custom OpenAI-compatible
 - Daftar model per provider ditarik dinamis dari base URL masing-masing; connection status + model selector dari chat
 - Semua perubahan konfigurasi (API key, base URL, dll.) memberi **Toast/Dialog konfirmasi** eksplisit
@@ -39,24 +41,29 @@
 
 ### Agent Engine (CLI-grade)
 - Arsitektur modular: `GUI → AgentOrchestrator → Engine`
-- **Mode izin**: Ask, Plan, Auto Read-Edit, YOLO — kendali penuh seberapa bebas agent mengubah file & menjalankan command
-- **Workspace wajib ter-setup** (SAF) + dukungan `AGENTS.md` per project
-- **Built-in agent**: tool loop ter-sandbox — `list_files`, `read_file`, `write_file`, `delete_file`, `search`, `run_command` — dibatasi workspace, maksimum iterasi dapat diatur
+- **Mode izin**: Ask, Plan, Auto Read-Edit, YOLO — YOLO benar-benar auto-approve semua tool (create/modify/delete file, npm/node/test/build) dengan tetap dibatasi workspace + blocklist command berbahaya
+- **Workspace aktif = satu sumber kebenaran**: agent mengetahui path workspace, file tools & `run_command` berjalan di dalamnya; **command sandbox Linux di-bind langsung ke folder workspace Android** (`-b <workspace>:/home/user/workspace`), sehingga `npm create vite`, `npm install`, `npm run build` benar-benar menyentuh file project
+- **Workspace wajib ter-setup** (SAF atau app-dir) + dukungan `AGENTS.md` per project
+- **Built-in agent**: tool loop ter-sandbox — `list_files`, `read_file`, `write_file`, `delete_file`, `search`, `run_command` — progress ditampilkan sebagai kartu aktivitas collapsible di chat
 - **OpenCode engine** (opsional): hubungkan ke server OpenCode (`opencode serve`) via HTTP; bila tidak tersedia, otomatis fallback
 - `run_command` dieksekusi di **sandbox Linux tertanam** bila siap (lihat di bawah), fallback ke shell Android
 
-### Terminal + Lingkungan Linux Embedded (hidden by default)
-- Toggle `Terminal ▼` di bawah chat — chat tetap UI utama; terminal bisa diperluas layar penuh
+### Terminal (Activity layar penuh, terpisah)
+- Toggle ikon **$** di header chat membuka **TerminalActivity** terpisah — chat tidak berkurang ruangnya; kembali ke chat, state tetap
+- Terminal otomatis memakai **cwd = workspace aktif** (bind ke sandbox Linux bila READY, path asli bila legacy shell)
+- Multi-session, command history, copy/paste, selection, clear, ANSI, font size, background process + stdin REPL, process manager
+- **Quick commands**: chip `ls`, `git status`, `node -v`, `python3 --version`, dll.
+- Detail lengkap: [docs/LINUX_ENV.md](docs/LINUX_ENV.md)
+
+### Lingkungan Linux Embedded (proot + Ubuntu)
 - **Saat Linux siap**: shell `bash -li` nyata di dalam Ubuntu (proot) — `bash`, `ls`, `cd`, `mkdir`, `rm`, `grep`, `sed`, `awk`, `tar`, `ps`, `kill`, dll. berjalan normal
 - **apt sungguhan**: `apt update`, `apt install nodejs npm`, `apt search/list` — paket diunduh dari mirror Ubuntu
 - **Node.js + npm + npx** dan **Python 3 + pip3** nyata (`npm init/install/run start/dev`, `node server.js`, `python3 -m venv`, dll.)
 - Dev tools satu perintah: `apt install git curl wget openssh-client make gcc g++ pkg-config`
-- **Background process**: `node server.js &` tetap hidup saat terminal disembunyikan; Process Manager (PID, port, durasi, stop/restart, auto-restart, stdin REPL); `ps`/`kill`/`killall` dari dalam sandbox
+- **Background process**: `node server.js &` tetap hidup saat terminal ditutup; Process Manager (PID, port, durasi, stop/restart, auto-restart, stdin REPL); `ps`/`kill`/`killall` dari dalam sandbox
 - **Cron**: `crontab` kompatibel sintaks cron + scheduler internal in-app sebagai fallback (log `var/log/openchai-cron.log` di dalam rootfs)
-- **Workspace persisten**: `/home/user/workspace` bertahan antar sesi & restart aplikasi; rootfs juga persisten
-- ANSI color, history, copy/paste, selection, clear, font size, Ctrl+C/Ctrl+D, auto-scroll
+- **Workspace persisten**: folder workspace aktif di-bind ke sandbox (`/home/user/workspace`) dan bertahan antar sesi & restart aplikasi
 - Setup wizard dengan cek kelayakan (ABI, RAM ≥ ~2.5 GB, storage) + progress unduhan rootfs (resumable, SHA-256 terverifikasi)
-- Detail lengkap: [docs/LINUX_ENV.md](docs/LINUX_ENV.md)
 
 ### Runtime Packs (engine AI modular)
 - Layar **Settings → Runtime & Modul**: pasang/hapus runtime llama.cpp per-ABI dari manifest (unduhan resumable + pause/resume + SHA-256)
@@ -151,6 +158,7 @@ Open Chat AI men-embed [llama.cpp](https://github.com/ggml-org/llama.cpp) (pin t
 | v1.7.0 | Runtime packs: pasang/hapus runtime & modul, manifest, auto-install |
 | v1.8.0 | **Lingkungan Linux embedded** (proot + Ubuntu, apt/Node/Python), rename paket `com.openchatai.app`, Toast konfirmasi konfigurasi |
 | v1.8.1 | Katalog model low-RAM (Qwen3.5 0.8B, LFM2 1.2B, Qwen3 0.6B, Qwen2.5 0.5B Q4_K_M), sizeBytes eksak, semua model teruji inferensi |
+| v1.9.0 | **Audit & perbaikan root-cause**: chat langsung muncul setelah create workspace (race lifecycle diperbaiki), command agent & terminal ter-bind ke workspace aktif, Ollama auto-detect + Start + Test model, model selector di header, agent actions satu tombol, auto-scroll + "New messages", **Terminal sebagai Activity terpisah**, agent events collapsible |
 
 ## Attribution & Lisensi
 

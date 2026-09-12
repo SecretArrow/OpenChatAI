@@ -33,8 +33,11 @@ import java.util.concurrent.atomic.AtomicLong
  * - Output tiap proses disimpan pada ring buffer 256 ribu karakter per id,
  *   dengan counter revisi (StateFlow<Long>) yang naik tiap batch output baru
  *   sebagai pemicu refresh UI.
- * - cwd host DIABAIKAN: proses selalu dijalankan dari /home/user/workspace
- *   (proot `-w` + prefix `cd` sebagai pengaman).
+ * - cwd host dipetakan lewat [LinuxEnvManager.guestWorkspaceBind]: bila cwd
+ *   adalah direktori Android nyata, direktori itu di-bind ke
+ *   /home/user/workspace (bind TERAKHIR menimpa workspace internal rootfs)
+ *   sehingga command berjalan PADA workspace Android aktif; bila tidak bisa
+ *   di-bind, perilaku lama tetap dipakai (workspace internal rootfs).
  * - pid tidak tersedia (di dalam proot) dan detectedPort tidak dideteksi.
  * - Saat lingkungan READY, cron in-app (LinuxCron) ikut dijalankan; fase
  *   lain menghentikannya.
@@ -71,7 +74,9 @@ class LinuxProcessSupervisor(
 
     private data class ProcSpec(
         val command: String,
-        val autoRestart: Boolean
+        val autoRestart: Boolean,
+        /** Bind host workspace (hasil guestWorkspaceBind) — dipakai ulang saat restart. */
+        val bind: String?
     )
 
     init {
@@ -90,7 +95,9 @@ class LinuxProcessSupervisor(
     // ------------------------------------------------------------------
 
     override fun start(command: String, cwd: String, autoRestart: Boolean): ManagedProcess {
-        // cwd host DIABAIKAN — proses selalu jalan di /home/user/workspace proot.
+        // cwd host dipetakan ke bind host (bila direktori Android nyata) agar
+        // proses latar berjalan PADA workspace aktif; else workspace internal.
+        val bind = env.guestWorkspaceBind(cwd)
         val id = UUID.randomUUID().toString()
         val entry = ManagedProcess(
             id = id,
@@ -101,13 +108,13 @@ class LinuxProcessSupervisor(
             autoRestart = autoRestart,
             detectedPort = null  // deteksi port tidak berlaku di userspace proot
         )
-        specs[id] = ProcSpec(command, autoRestart)
+        specs[id] = ProcSpec(command, autoRestart, bind)
         userStopped[id] = false
         generations[id] = AtomicLong(0)
         outputBuffers[id] = StringBuilder()
         outputRevisions[id] = MutableStateFlow(0L)
         _processes.update { it + entry }
-        launchRuntime(id, command)
+        launchRuntime(id, command, bind)
         return entry
     }
 
@@ -150,7 +157,7 @@ class LinuxProcessSupervisor(
         userStopped[id] = false
         scope.launch {
             delay(RESTART_DELAY_MS) // beri waktu proot membersihkan tracee lama
-            launchRuntime(id, spec.command)
+            launchRuntime(id, spec.command, spec.bind)
         }
     }
 
@@ -207,18 +214,20 @@ class LinuxProcessSupervisor(
     // Runtime per proses
     // ------------------------------------------------------------------
 
-    private fun launchRuntime(id: String, command: String) {
+    private fun launchRuntime(id: String, command: String, bind: String?) {
         // Rekam generasi saat ini; bila restart menaikkan generasi,
         // monitor lama tidak boleh mengubah state entri lagi.
         val generation = generations.getOrPut(id) { AtomicLong(0) }.get()
         val job = scope.launch {
             // Prefix `cd` sebagai pengaman: command user selalu dari workspace
-            // (cwd host diabaikan; `2>/dev/null` agar gagal cd tidak berisik).
+            // (cwd guest = WORKSPACE_DIR; `2>/dev/null` agar gagal cd tidak
+            // berisik). Bind host (bila ada) menimpa direktori tersebut dengan
+            // workspace Android asli.
             val shellCommand = "cd ${LinuxShell.WORKSPACE_DIR} 2>/dev/null; $command"
             val process = try {
                 ProcessBuilder(
                     env.prootBinary().absolutePath,
-                    *env.prootArgs(LinuxShell.WORKSPACE_DIR).toTypedArray(),
+                    *env.prootArgs(LinuxShell.WORKSPACE_DIR, bind).toTypedArray(),
                     "/bin/bash", "-c", shellCommand
                 ).apply {
                     environment().putAll(env.envEnvVars())
@@ -347,8 +356,11 @@ class LinuxProcessSupervisor(
 
     override suspend fun run(command: String, cwd: String?, timeoutMs: Long): CommandResult =
         withContext(Dispatchers.IO) {
-            // cwd host diabaikan; execOnce selalu mengeksekusi di workspace proot.
-            env.execOnce(command, LinuxShell.WORKSPACE_DIR, timeoutMs)
+            // cwd host dipetakan ke bind host (bila direktori nyata); bila tidak
+            // bisa di-bind, command tetap jalan di workspace internal rootfs
+            // (perilaku lama).
+            val bind = env.guestWorkspaceBind(cwd)
+            env.execOnce(command, LinuxShell.WORKSPACE_DIR, timeoutMs, bind)
         }
 
     companion object {

@@ -29,6 +29,7 @@ Sumber unduhan: bartowski, unsloth, ggml-org, LiquidAI, dan Qwen di Hugging Face
 - **Import GGUF** dari penyimpanan perangkat via SAF (file manager), dan **Export** model yang sudah diunduh — berguna untuk berbagi tanpa unduh ulang.
 - Model tersimpan di storage privat aplikasi: `filesDir/models/<id>.gguf`.
 - Cek RAM perangkat dilakukan sebelum load; model yang melebihi RAM akan ditolak dengan pesan jelas.
+- **Uji cepat dari chat**: buka Model Selector di header chat → pilih provider **On-device** → tombol **Test** pada model — aplikasi mengirim prompt kecil dan menampilkan balasan + durasi, atau error lengkap bila gagal (lihat [PROVIDERS.md](PROVIDERS.md)).
 
 ## Runtime Packs (ganti engine tanpa update APK)
 

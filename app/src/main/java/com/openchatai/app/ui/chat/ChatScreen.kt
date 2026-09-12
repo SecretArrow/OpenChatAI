@@ -1,7 +1,6 @@
 package com.openchatai.app.ui.chat
 
 import android.content.Intent
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,10 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -43,13 +40,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -60,10 +60,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.openchatai.app.background.SessionGenState
 import com.openchatai.app.ui.components.StatusDot
 import com.openchatai.app.ui.theme.TerminalYellow
+import com.openchatai.app.ui.terminal.TerminalActivity
 import com.openchai.core.agent.PermissionMode
 import com.openchai.core.model.Role
 import com.openchai.core.settings.EngineMode
-import com.openchatai.app.ui.terminal.TerminalPanel
+import kotlinx.coroutines.launch
 
 /** Slash command cepat: chip di atas input bar, mengisi prompt yang lebih lengkap. */
 private val SLASH_COMMANDS = listOf(
@@ -82,6 +83,14 @@ private val PERMISSION_MODE_OPTIONS = listOf(
     PermissionMode.FULL_ACCESS to "YOLO"
 )
 
+/**
+ * Aksi cepat agent di header (menu ikon tools). Nama persis dikirim ke
+ * [ChatViewModel.runAgentAction] (implementasi MAIN — kontrak Task 11).
+ */
+private val AGENT_MENU_ACTIONS = listOf(
+    "Fix", "Test", "Build", "Run", "Debug", "Explain", "Review", "Commit"
+)
+
 private fun PermissionMode.chatLabel(): String =
     PERMISSION_MODE_OPTIONS.firstOrNull { it.first == this }?.second ?: name
 
@@ -89,15 +98,21 @@ private fun PermissionMode.chatLabel(): String =
  * Pusat pengalaman aplikasi: chat AI coding agent (multi-sesi paralel).
  *
  * Struktur (Column):
- *  - Header: tombol menu (buka drawer "Chats") + judul + tombol Settings.
+ *  - Header: tombol menu (drawer "Chats") + ModeSwitcherChip + judul
+ *    "Workspace: <nama>" (fallback "Open Chat AI") + aksi agent (ikon tools) +
+ *    Terminal (Activity layar penuh terpisah) + menu MoreVert
+ *    (Export as Markdown / Settings).
  *  - Chip selector: Project & Model (buka ModalBottomSheet).
  *  - Banner status kecil (offline / engine fallback) — hanya saat perlu.
  *  - LazyColumn pesan (weight 1f) + EmptyChatState saat kosong + blok streaming
  *    (kartu aktivitas agent + partial answer + TypingIndicator) saat sesi aktif
  *    masih Running di GenerationManager.
+ *  - Chip "New messages" saat streaming & user tidak di dekat bawah.
  *  - ChatInputBar.
- *  - Toggle bar Terminal (slim) + TerminalPanel.
  *  - Sheets: ModelSelectorSheet & ProjectSelectorSheet.
+ *
+ * Catatan: terminal tidak lagi embedded (dipindah ke TerminalActivity);
+ * [onOpenLinuxSetup] dipertahankan demi kompatibilitas call site NavGraph.
  */
 @Composable
 fun ChatScreen(
@@ -129,9 +144,11 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     var showModelSheet by remember { mutableStateOf(false) }
     var showProjectSheet by remember { mutableStateOf(false) }
-    var terminalVisible by remember { mutableStateOf(false) }
+    var agentMenuOpen by remember { mutableStateOf(false) }
+    var moreMenuOpen by remember { mutableStateOf(false) }
     var inputText by remember { mutableStateOf("") }
     val clipboard = LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
 
     val lastMessage = messages.lastOrNull()
     val lastAssistantId = messages.lastOrNull { it.role == Role.ASSISTANT }?.id
@@ -184,13 +201,26 @@ fun ChatScreen(
         (if (streamingVisible) 1 else 0)
     val lastContentLength = lastMessage?.content?.length ?: 0
 
-    // Auto-scroll pintar: ikuti bawah saat generating, atau bila user sudah dekat bawah.
+    // "Dekat bawah" dihitung tiap frame dari layoutInfo (derivedStateOf):
+    // dipakai untuk auto-follow DAN untuk menampilkan chip "New messages".
+    val atBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+            // Belum ada item ter-layout (mis. baru masuk layar) → anggap di bawah.
+            lastVisible < 0 || lastVisible >= info.totalItemsCount - 2
+        }
+    }
+
+    // Auto-scroll pintar: ikuti bawah HANYA bila user sudah dekat bawah.
+    // Saat streaming dan user membaca ke atas → JANGAN paksa scroll; chip
+    // "New messages" (di bawah) yang menawarkan lompatan manual.
     LaunchedEffect(messages.size, lastContentLength, streamProgress, isGenerating) {
         if (messages.isEmpty()) return@LaunchedEffect
         val target = itemCount - 1
         val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
         val nearBottom = lastVisible < 0 || lastVisible >= target - 1
-        if (isGenerating || nearBottom) {
+        if (nearBottom) {
             listState.animateScrollToItem(target)
         }
     }
@@ -212,18 +242,62 @@ fun ChatScreen(
                 current = settings.permissionMode,
                 onSelect = chatViewModel::setPermissionMode
             )
+            // Judul workspace aktif; fallback nama app bila belum ada workspace.
             Text(
-                text = "Open Chat AI",
+                text = activeProject?.name?.takeIf { it.isNotBlank() }
+                    ?.let { "Workspace: $it" } ?: "Open Chat AI",
                 style = MaterialTheme.typography.titleLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 4.dp)
             )
-            IconButton(onClick = { exportConversationMarkdown() }) {
-                Icon(Icons.Filled.Share, contentDescription = "Export chat as Markdown")
+            // Aksi cepat agent (Fix/Test/Build/...) → runAgentAction.
+            Box {
+                IconButton(onClick = { agentMenuOpen = true }) {
+                    // Ikon tools (kunci inggris) — core icon set (Bolt hanya di extended).
+                    Icon(Icons.Filled.Build, contentDescription = "Agent actions")
+                }
+                AgentActionsMenu(
+                    expanded = agentMenuOpen,
+                    onDismiss = { agentMenuOpen = false },
+                    onAction = { name ->
+                        agentMenuOpen = false
+                        chatViewModel.runAgentAction(name)
+                    }
+                )
             }
-            IconButton(onClick = onOpenSettings) {
-                Icon(Icons.Filled.Settings, contentDescription = "Settings")
+            // Terminal layar penuh (Activity terpisah, bukan lagi panel embedded).
+            IconButton(onClick = { context.startActivity(TerminalActivity.intent(context)) }) {
+                // Prompt shell "$" — tanpa ikon extended (core set tak punya Terminal).
+                Text(
+                    text = "$",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+            // Menu lainnya: export markdown + settings.
+            Box {
+                IconButton(onClick = { moreMenuOpen = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "More options")
+                }
+                DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Export as Markdown") },
+                        onClick = {
+                            moreMenuOpen = false
+                            exportConversationMarkdown()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Settings") },
+                        onClick = {
+                            moreMenuOpen = false
+                            onOpenSettings()
+                        }
+                    )
+                }
             }
         }
 
@@ -328,7 +402,10 @@ fun ChatScreen(
                     item(key = "streaming") {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             if (activeRunning.steps.isNotEmpty()) {
-                                AgentActivityCard(steps = activeRunning.steps, isLive = true)
+                                CollapsibleAgentActivityCard(
+                                    steps = activeRunning.steps,
+                                    isLive = true
+                                )
                             }
                             if (activeRunning.partialText.isNotBlank()) {
                                 MarkdownText(
@@ -373,6 +450,35 @@ fun ChatScreen(
             )
         }
 
+        // ---------------- Chip "New messages" (align end, di atas input) ----------------
+        // Muncul hanya saat streaming berjalan dan user TIDAK di dekat bawah
+        // (auto-follow sengaja tidak memaksa scroll). Tap → lompat ke item
+        // terakhir; karena posisi kembali di bawah, follow aktif lagi otomatis.
+        if (streamingVisible && !atBottom) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                AssistChip(
+                    onClick = {
+                        scope.launch { listState.animateScrollToItem(itemCount - 1) }
+                    },
+                    label = {
+                        Text("New messages", style = MaterialTheme.typography.labelMedium)
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                )
+            }
+        }
+
         // ---------------- Input ----------------
         ChatInputBar(
             text = inputText,
@@ -386,41 +492,6 @@ fun ChatScreen(
             isGenerating = isGenerating,
             onStop = chatViewModel::stopGeneration,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
-        )
-
-        // ---------------- Terminal toggle ----------------
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(36.dp)
-                    .clickable { terminalVisible = !terminalVisible }
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Terminal",
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.weight(1f)
-                )
-                Icon(
-                    imageVector = if (terminalVisible) {
-                        Icons.Filled.KeyboardArrowUp
-                    } else {
-                        Icons.Filled.KeyboardArrowDown
-                    },
-                    contentDescription = if (terminalVisible) "Hide terminal" else "Show terminal"
-                )
-            }
-        }
-        TerminalPanel(
-            visible = terminalVisible,
-            onCollapse = { terminalVisible = false },
-            onOpenLinuxSetup = onOpenLinuxSetup
         )
 
         // ---------------- Sheets ----------------
@@ -517,6 +588,27 @@ private fun ModeSwitcherChip(current: PermissionMode, onSelect: (PermissionMode)
                     }
                 )
             }
+        }
+    }
+}
+
+/**
+ * Menu aksi cepat agent (anchor: ikon tools di header). Setiap item meneruskan
+ * NAMA aksi persis ("Fix", "Test", dst.) ke [ChatViewModel.runAgentAction] —
+ * eksekusinya (prompt agent + sesi) diimplementasi MAIN (kontrak Task 11).
+ */
+@Composable
+internal fun AgentActionsMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onAction: (String) -> Unit
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        AGENT_MENU_ACTIONS.forEach { name ->
+            DropdownMenuItem(
+                text = { Text(name) },
+                onClick = { onAction(name) }
+            )
         }
     }
 }

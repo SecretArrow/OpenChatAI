@@ -36,17 +36,20 @@ Workspace `/home/user/workspace` dibuat saat setup dan **persisten** — file, p
 - Bila daemon cron dibatasi Android, scheduler internal in-app menjalankan entri yang sama (tick 60 detik, mendukung `*`, `*/n`, rentang, daftar koma, OR dom/dow) — hasil dieksekusi lewat runner yang sama dan dicatat di `var/log/openchai-cron.log` (rotasi otomatis 256 KB → 128 KB).
 - Cron hanya aktif saat lingkungan berstatus READY dan berhenti saat lingkungan dihancurkan.
 
-## Terminal UX
+## Terminal
 
-Toggle **Show/Hide** di bawah chat (chat tetap UI utama; panel terminal bisa diperluas layar penuh): ANSI color, command history, copy/paste, text selection, clear, search, auto-scroll, font size, **Ctrl+C** (sinyal ke proses depan), **Ctrl+D** (EOF), Tab completion dari bash, resize mengikuti panel.
+Ikon **$** di header chat membuka **TerminalActivity** terpisah (layar penuh) — chat tidak pernah kehilangan ruang; kembali ke chat, state percakapan tetap. Terminal otomatis berada di **cwd = workspace aktif**.
+
+Fitur terminal: ANSI color, command history, copy/paste, text selection, clear, search, auto-scroll, font size, **Ctrl+C** (sinyal ke proses depan), **Ctrl+D** (EOF), Tab completion dari bash, resize mengikuti jendela.
 
 ## Integrasi AI → Terminal
 
 Tool agent `run_command` otomatis diarahkan ke sandbox Linux saat status READY:
 
-- AI bisa menjalankan `npm install`, `python3 script.py`, `git status`, dll. **di dalam rootfs** (cwd `/home/user/workspace`).
+- AI bisa menjalankan `npm install`, `python3 script.py`, `git status`, dll. — **folder workspace Android di-bind langsung ke rootfs** (`proot -b <workspace>:/home/user/workspace`), jadi cwd di dalam sandbox ADALAH folder project asli: file yang dibuat `npm create vite` = file yang dibaca `read_file` = file yang terlihat di layar Files perangkat.
+- Workspace SAF pada storage utama (`primary:...`) juga di-bind bila path fisiknya dapat diturunkan; SAF non-primary memakai file tools saja dengan pesan error yang jelas.
 - stdout, stderr, dan exit code dikembalikan ke agent untuk dievaluasi.
-- Bila Linux belum siap (atau tidak memenuhi syarat perangkat), `run_command` fallback ke shell Android secara transparan.
+- Bila Linux belum siap (atau tidak memenuhi syarat perangkat), `run_command` fallback ke shell Android secara transparan (cwd = path workspace asli).
 
 ## Keamanan & batasan
 

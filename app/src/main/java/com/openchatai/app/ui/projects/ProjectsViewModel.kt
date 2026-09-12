@@ -101,17 +101,26 @@ class ProjectsViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------------
 
     /**
-     * Tandai workspace aktif: set [com.openchatai.app.AppContainer.activeProject]
+     * Aktifkan workspace: set [com.openchatai.app.AppContainer.activeProject]
      * + simpan activeWorkspaceId di settings (field lain dipertahankan).
-     * Navigasi ke Chat dilakukan UI lewat callback.
+     *
+     * Suspend & private: PEMANGGIL YANG BUTUH JAMINAN activeProject terisi
+     * (createAppWorkspace/createSafWorkspace sebelum onDone) WAJIB await fungsi
+     * ini INLINE dalam korutina yang sama — JANGAN fire-and-forget — agar
+     * navigasi ke Chat tidak mendahului pengisian workspace aktif
+     * (root cause bug "chat tidak muncul" setelah create workspace).
+     * Navigasi ke Chat tetap dilakukan UI lewat callback.
      */
-    fun setActive(project: Project) {
-        viewModelScope.launch {
-            container.activeProject.value = project
-            runCatching {
-                container.settingsRepository.update { it.copy(activeWorkspaceId = project.id) }
-            }
+    private suspend fun activate(project: Project) {
+        container.activeProject.value = project
+        runCatching {
+            container.settingsRepository.update { it.copy(activeWorkspaceId = project.id) }
         }
+    }
+
+    /** Tetap publik (dipakai ProjectsScreen) — fire-and-forget via korutina VM. */
+    fun setActive(project: Project) {
+        viewModelScope.launch { activate(project) }
     }
 
     /** Workspace app-dir baru (createProject) + langsung diaktifkan. */
@@ -121,7 +130,11 @@ class ProjectsViewModel(app: Application) : AndroidViewModel(app) {
                 runCatching { container.workspaceManager.createProject(name) }.getOrNull()
             }
             if (project != null) {
-                setActive(project)
+                // Await INLINE dalam korutina yang sama: activeProject WAJIB
+                // sudah terisi + persist SEBELUM refresh()/onDone() — bila
+                // fire-and-forget, navigasi ke Chat mendahului pengisian
+                // workspace aktif dan chat tidak muncul (root cause bug 11).
+                activate(project)
                 refresh()
                 onDone(project)
             } else {
@@ -141,7 +154,9 @@ class ProjectsViewModel(app: Application) : AndroidViewModel(app) {
                     .getOrNull()
             }
             if (project != null) {
-                setActive(project)
+                // Await INLINE (idem createAppWorkspace): jangan setActive()
+                // fire-and-forget lalu langsung onDone.
+                activate(project)
                 refresh()
                 onDone(project)
             } else {

@@ -29,8 +29,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * ke StateFlow secara berkala agar UI tidak re-render tiap karakter.
  *
  * Catatan perilaku:
- * - Parameter cwd pada createSession DIABAIKAN; shell Linux selalu mulai di
- *   /home/user/workspace (proot sudah mengatur cwd lewat argumen `-w`).
+ * - Parameter cwd pada createSession dipetakan lewat
+ *   [LinuxEnvManager.guestWorkspaceBind]: bila cwd host adalah direktori
+ *   Android nyata, direktori itu di-bind ke /home/user/workspace (bind
+ *   TERAKHIR menimpa workspace internal rootfs) sehingga shell berjalan PADA
+ *   workspace Android aktif. cwd guest TETAP WORKSPACE_DIR (path internal
+ *   konstan); bila cwd tidak bisa di-bind, perilaku lama dipakai.
  * - Entri sesi yang prosesnya sudah mati TIDAK dihapus otomatis
  *   (alive=false) agar UI tetap bisa menampilkan output terakhir;
  *   bersihkan lewat [pruneDeadSessions] bila perlu.
@@ -114,8 +118,11 @@ class LinuxShell(
     }
 
     override fun createSession(cwd: String, title: String): String {
-        // cwd host DIABAIKAN — shell Linux selalu berjalan di workspace proot.
+        // cwd guest tetap workspace internal (const); cwd HOST dipetakan ke
+        // bind host agar shell berjalan pada workspace Android aktif bila
+        // direktori itu nyata dan bisa di-bind.
         val workspace = WORKSPACE_DIR
+        val bind = env.guestWorkspaceBind(cwd)
         val id = UUID.randomUUID().toString()
 
         var process: Process? = null
@@ -124,7 +131,7 @@ class LinuxShell(
             // proot <args -w /home/user/workspace> /bin/bash -li
             process = ProcessBuilder(
                 env.prootBinary().absolutePath,
-                *env.prootArgs(workspace).toTypedArray(),
+                *env.prootArgs(workspace, bind).toTypedArray(),
                 "/bin/bash", "-li"
             ).apply {
                 environment().putAll(env.envEnvVars()) // HOME/PATH/PS1 dsb dari env manager

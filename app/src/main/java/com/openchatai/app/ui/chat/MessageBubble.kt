@@ -3,15 +3,32 @@ package com.openchatai.app.ui.chat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -25,18 +42,26 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.openchai.core.model.AgentStep
 import com.openchai.core.model.ChatMessage
 import com.openchai.core.model.Role
+import com.openchai.core.model.StepState
+
+private val StepDoneGreen = Color(0xFF3FB950)
 
 /**
  * Satu unit pesan chat:
  *  - USER          → bubble kanan (primaryContainer), teks polos.
  *  - ASSISTANT     → bubble kiri (surface + outline) berisi MarkdownText.
  *  - ASSISTANT err → bubble error (surfaceVariant + border error) dengan tombol Retry.
- *  - Agent activity→ AgentActivityCard (isLive saat kartu terakhir & sedang generating).
+ *  - Agent activity→ CollapsibleAgentActivityCard (isLive saat kartu terakhir &
+ *    sedang generating) — langkah ringkas + detail collapsible.
  *
  * Long-press (combinedClickable) → DropdownMenu: Copy (semua pesan),
  * Edit (hanya user → dialog → onEdit(id, text)), Regenerate (assistant terakhir).
@@ -84,7 +109,7 @@ fun MessageBubble(
                     .clip(RoundedCornerShape(16.dp))
                     .combinedClickable(onClick = {}, onLongClick = { menuOpen = true })
             ) {
-                AgentActivityCard(
+                CollapsibleAgentActivityCard(
                     steps = message.steps,
                     isLive = isGenerating && isLastAssistant,
                     modifier = Modifier.fillMaxWidth()
@@ -184,6 +209,137 @@ fun MessageBubble(
             dismissButton = {
                 TextButton(onClick = { editOpen = false }) { Text("Cancel") }
             }
+        )
+    }
+}
+
+/**
+ * Kartu aktivitas agent versi collapsible (pemakai: MessageBubble & blok
+ * streaming ChatScreen). Tampilan default RINGKAS: satu langkah = satu baris
+ * (ikon status ✓/⏳/✗ + label). Bila ada langkah ber-detail, tombol
+ * "View execution details" membuka area detail per kartu: daftar detail
+ * monospace dengan tinggi maksimum + scroll.
+ *
+ * Catatan: menggantikan pemakaian langsung AgentActivityCard di chat tanpa
+ * mengubah file tersebut (bukan milik 11-d) dan tanpa mengubah signature
+ * [MessageBubble].
+ */
+@Composable
+internal fun CollapsibleAgentActivityCard(
+    steps: List<AgentStep>,
+    isLive: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val hasRunning = steps.any { it.state == StepState.RUNNING }
+    val detailSteps = remember(steps) { steps.filter { !it.detail.isNullOrBlank() } }
+    var detailsOpen by remember(steps) { mutableStateOf(false) }
+
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = if (hasRunning && isLive) "🤖 Working on your project…" else "Agent activity",
+                style = MaterialTheme.typography.titleMedium
+            )
+            // Baris ringkas: satu langkah = satu baris (ikon status + label).
+            steps.forEach { step ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    StepStateIcon(step.state)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = step.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+            // Detail eksekusi: hanya bila ada langkah dengan detail non-blank.
+            if (detailSteps.isNotEmpty()) {
+                TextButton(
+                    onClick = { detailsOpen = !detailsOpen },
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        text = if (detailsOpen) "Hide execution details" else "View execution details",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = if (detailsOpen) {
+                            Icons.Filled.KeyboardArrowUp
+                        } else {
+                            Icons.Filled.KeyboardArrowDown
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                if (detailsOpen) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 220.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            detailSteps.forEach { step ->
+                                Text(
+                                    text = "• ${step.label}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = step.detail.orEmpty(),
+                                    fontFamily = FontFamily.Monospace,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Ikon status satu langkah: DONE ✓ hijau, RUNNING spinner, FAILED warning. */
+@Composable
+private fun StepStateIcon(state: StepState) {
+    when (state) {
+        StepState.DONE -> Icon(
+            imageVector = Icons.Filled.CheckCircle,
+            contentDescription = "Done",
+            tint = StepDoneGreen,
+            modifier = Modifier.size(16.dp)
+        )
+        StepState.RUNNING -> CircularProgressIndicator(
+            modifier = Modifier.size(14.dp),
+            strokeWidth = 2.dp
+        )
+        StepState.FAILED -> Icon(
+            imageVector = Icons.Filled.Warning,
+            contentDescription = "Failed",
+            tint = MaterialTheme.colorScheme.error,
+            modifier = Modifier.size(16.dp)
         )
     }
 }

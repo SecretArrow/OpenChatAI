@@ -5,6 +5,7 @@ import com.openchai.agent.BuiltInAgent
 import com.openchai.agent.opencode.OpenCodeRuntime
 import com.openchatai.app.ai.ProviderRegistry
 import com.openchatai.app.ai.LocalLlamaProvider
+import com.openchatai.app.ai.OllamaLauncher
 import com.openchatai.app.permissions.DefaultPermissionBroker
 import com.openchatai.app.ai.OllamaProvider
 import com.openchatai.app.ai.OpenAiCompatProvider
@@ -43,9 +44,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 /** Graph dependency aplikasi. Semua modul modular & dapat diganti independently. */
 class AppContainer(context: Context) {
@@ -72,8 +73,31 @@ class AppContainer(context: Context) {
     val terminalHost: TerminalHost = DelegatingTerminalHost(linuxEnv, linuxShell, terminalManagerLegacy)
     val processSupervisor: ProcessSupervisor = DelegatingProcessSupervisor(linuxEnv, linuxSupervisor, processManager)
 
+    // Satu pintu keamanan command agent — KDoc CommandRunner tetap berlaku:
+    // agent TIDAK boleh exec process sendiri di luar interface ini. Dengan
+    // delegating, command agent kini berjalan di sandbox Linux (proot, user
+    // non-root) bila lingkungan READY, else fallback AndroidProcessManager legacy.
+    // (Dipindah ke atas: urutan inisialisasi property Kotlin mengikuti urutan
+    // deklarasi, dan val ollamaLauncher di bawah membutuhkannya.)
+    private val delegatingCommandRunner: CommandRunner =
+        DelegatingCommandRunner(linuxEnv, linuxSupervisor, processManager)
+
+    // Launcher Ollama di dalam sandbox Linux (kontrak 11-c). Dipakai VM/UI lewat
+    // tombol "Start Ollama": mulai `ollama serve` via supervisor delegating dan
+    // probe `command -v ollama` via delegatingCommandRunner.
+    val ollamaLauncher: OllamaLauncher =
+        OllamaLauncher(context, linuxEnv, processSupervisor, delegatingCommandRunner)
+
     // Proyek aktif (dipakai UI, agent, dan terminal)
     val activeProject = MutableStateFlow<Project?>(null)
+
+    // Sinyal selesai restore awal: true SETELAH snapshot settings pertama dibaca
+    // + attempt pemulihan activeWorkspaceId (apapun hasilnya). Dipakai NavGraph
+    // untuk gating first-run TANPA delay heuristik.
+    private val _initState = MutableStateFlow(false)
+
+    /** True bila restore workspace awal (DataStore first emission + attempt) SUDAH selesai. */
+    val initState: StateFlow<Boolean> = _initState.asStateFlow()
 
     // AI lokal on-device (llama.cpp)
     // RuntimeManager HARUS dibuat sebelum llamaEngine: ctor-nya memindah pack
@@ -111,28 +135,25 @@ class AppContainer(context: Context) {
         }
 
         // Pulihkan workspace aktif terakhir (activeWorkspaceId) — chat langsung
-        // terhubung ke workspace sebelumnya tanpa setup ulang. Timeout 3 detik:
-        // bila DataStore belum selesai dimuat, gating UI (workspace_setup) yang
-        // menangani kasus kosong. Workspace SAF sudah punya persistable grant.
+        // terhubung ke workspace sebelumnya tanpa setup ulang. TANPA timeout:
+        // settings adalah StateFlow, jadi first() selesai deterministik begitu
+        // DataStore selesai dibaca dari disk (snapshot pertama SELALU datang).
+        // Workspace SAF sudah punya persistable grant.
         appScope.launch {
-            val s = withTimeoutOrNull(3000) {
-                settingsRepository.settings.first { it.activeWorkspaceId.isNotBlank() }
-            } ?: return@launch
-            val p = runCatching {
-                workspaceManager.listProjects().firstOrNull { pr -> pr.id == s.activeWorkspaceId }
-            }.getOrNull()
-            if (p != null && activeProject.value == null) {
-                activeProject.value = p
+            val s = runCatching { settingsRepository.settings.first() }.getOrNull()
+            if (s != null && s.activeWorkspaceId.isNotBlank()) {
+                val p = runCatching {
+                    workspaceManager.listProjects().firstOrNull { pr -> pr.id == s.activeWorkspaceId }
+                }.getOrNull()
+                if (p != null && activeProject.value == null) {
+                    activeProject.value = p
+                }
             }
+            // Sinyal selesai SELALU diset — id kosong, project tak ditemukan,
+            // maupun baca settings gagal — agar gating navigasi tidak menggantung.
+            _initState.value = true
         }
     }
-
-    // Satu pintu keamanan command agent — KDoc CommandRunner tetap berlaku:
-    // agent TIDAK boleh exec process sendiri di luar interface ini. Dengan
-    // delegating, command agent kini berjalan di sandbox Linux (proot, user
-    // non-root) bila lingkungan READY, else fallback AndroidProcessManager legacy.
-    private val delegatingCommandRunner: CommandRunner =
-        DelegatingCommandRunner(linuxEnv, linuxSupervisor, processManager)
 
     // Agent engines (MCP + Skills di-wire ke BuiltInAgent)
     val builtInAgent: AgentEngine =

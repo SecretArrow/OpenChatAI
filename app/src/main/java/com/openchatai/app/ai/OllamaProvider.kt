@@ -14,21 +14,38 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.Locale
+import java.util.concurrent.TimeUnit
+
+/** Hasil diagnosis endpoint Ollama (dipakai UI untuk status + tombol Start Ollama). */
+sealed interface OllamaDiag {
+    /** Server hidup; version boleh null bila /api/version tak bisa diparse. */
+    data class Running(val version: String?, val modelCount: Int) : OllamaDiag
+    /** Koneksi ditolak / timeout / host tak ditemukan → server kemungkinan mati. */
+    data class NotRunning(val base: String) : OllamaDiag
+    /** Server terjangkau tapi jawabannya salah (HTTP error / payload tak terduga). */
+    data class Error(val base: String, val reason: String) : OllamaDiag
+}
 
 /**
  * Provider untuk server Ollama lokal.
  * - listModels : GET /api/tags
  * - test       : GET /api/version
+ * - diagnose   : GET /api/version + /api/tags (timeout pendek, status kaya)
  * - streamChat : POST /api/chat (NDJSON per baris, "stream": true)
  * Semua error dikonversi menjadi [StreamEvent.Error]; CancellationException diteruskan
  * agar pembatalan oleh UI tetap bekerja.
@@ -38,6 +55,15 @@ class OllamaProvider(private val settings: SettingsRepository) : AiProvider {
     override val providerId: ProviderId = ProviderId.OLLAMA
     override val displayName: String = "Ollama"
 
+    // Client timeout pendek khusus diagnosis: server mati harus terdeteksi cepat,
+    // tidak boleh menunggu timeout panjang milik [AiHttp] (read 300s).
+    private val diagClient: OkHttpClient = AiHttp.newBuilder()
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
+        .writeTimeout(4, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(false)
+        .build()
+
     private fun baseUrl(): String = settings.settings.value.ollamaEndpoint.trim().trimEnd('/')
 
     override fun isConfigured(): Boolean = baseUrl().isNotBlank()
@@ -46,25 +72,33 @@ class OllamaProvider(private val settings: SettingsRepository) : AiProvider {
         val base = baseUrl()
         if (base.isBlank()) return emptyList()
         val req = Request.Builder().url("$base/api/tags").get().build()
-        AiHttp.newCall(req).execute().use { resp ->
-            if (!resp.isSuccessful) {
-                throw IOException("Ollama HTTP ${resp.code}${errorSnippet(resp.body?.string())}")
+        try {
+            AiHttp.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    throw IOException("Ollama HTTP ${resp.code}${errorSnippet(resp.body?.string())}")
+                }
+                val root = parseJsonSafe(resp.body?.string().orEmpty()) ?: return emptyList()
+                val models = root.jsonArr("models") ?: return emptyList()
+                return models.mapNotNull { el ->
+                    val m = el as? JsonObject ?: return@mapNotNull null
+                    val name = m.jsonStr("name") ?: return@mapNotNull null
+                    val sizeBytes = m.jsonStr("size")?.toLongOrNull()
+                    ModelInfo(
+                        id = name,
+                        name = name,
+                        providerId = ProviderId.OLLAMA,
+                        providerName = displayName,
+                        isLocal = true,
+                        details = humanBytes(sizeBytes)
+                    )
+                }
             }
-            val root = parseJsonSafe(resp.body?.string().orEmpty()) ?: return emptyList()
-            val models = root.jsonArr("models") ?: return emptyList()
-            return models.mapNotNull { el ->
-                val m = el as? JsonObject ?: return@mapNotNull null
-                val name = m.jsonStr("name") ?: return@mapNotNull null
-                val sizeBytes = m.jsonStr("size")?.toLongOrNull()
-                ModelInfo(
-                    id = name,
-                    name = name,
-                    providerId = ProviderId.OLLAMA,
-                    providerName = displayName,
-                    isLocal = true,
-                    details = humanBytes(sizeBytes)
-                )
-            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: IOException) {
+            // Jangan bocorkan pesan mentah OkHttp — UI mencari frasa "not reachable"
+            // untuk menampilkan tombol Start Ollama.
+            throw IOException("Ollama is not reachable at $base — is it running?")
         }
     }
 
@@ -78,6 +112,55 @@ class OllamaProvider(private val settings: SettingsRepository) : AiProvider {
             throw ce
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /**
+     * Diagnosis ringkas endpoint Ollama dengan timeout pendek: /api/version lalu
+     * /api/tags. Koneksi ditolak/timeout/host tak dikenal → [OllamaDiag.NotRunning]
+     * (server kemungkinan mati); HTTP error / payload tak terduga → [OllamaDiag.Error];
+     * selain itu [OllamaDiag.Running] dengan versi + jumlah model terpasang.
+     */
+    suspend fun diagnose(): OllamaDiag {
+        val base = baseUrl()
+        if (base.isBlank()) {
+            return OllamaDiag.Error(
+                base = "http://127.0.0.1:11434",
+                reason = "Ollama endpoint is not set. Open Settings → AI."
+            )
+        }
+        return try {
+            withContext(Dispatchers.IO) {
+                // 1) /api/version — bukti server hidup + nomor versi.
+                val versionReq = Request.Builder().url("$base/api/version").get().build()
+                val version: String? = diagClient.newCall(versionReq).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        throw IOException("Ollama HTTP ${resp.code} at /api/version")
+                    }
+                    parseJsonSafe(resp.body?.string().orEmpty())?.jsonStr("version")
+                }
+                // 2) /api/tags — jumlah model terpasang.
+                val tagsReq = Request.Builder().url("$base/api/tags").get().build()
+                val modelCount: Int = diagClient.newCall(tagsReq).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        throw IOException("Ollama HTTP ${resp.code} at /api/tags")
+                    }
+                    parseJsonSafe(resp.body?.string().orEmpty())?.jsonArr("models")?.size
+                        ?: throw IOException("Unexpected response from /api/tags")
+                }
+                OllamaDiag.Running(version, modelCount)
+            }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: IOException) {
+            // UnknownHost / Connect refused / timeout → server kemungkinan mati.
+            if (e is UnknownHostException || e is ConnectException || e is SocketTimeoutException) {
+                OllamaDiag.NotRunning(base)
+            } else {
+                OllamaDiag.Error(base, e.message ?: e.toString())
+            }
+        } catch (e: Exception) {
+            OllamaDiag.Error(base, e.message ?: e.toString())
         }
     }
 
@@ -141,6 +224,9 @@ class OllamaProvider(private val settings: SettingsRepository) : AiProvider {
         } catch (ce: CancellationException) {
             call.cancel()
             throw ce
+        } catch (e: IOException) {
+            // Koneksi gagal (server mati/refused) → pesan konsisten dengan diagnose/listModels.
+            emit(StreamEvent.Error("Ollama is not reachable at $base — is it running?"))
         } catch (e: Exception) {
             emit(StreamEvent.Error("Ollama: ${e.message ?: "connection failed"}"))
         }

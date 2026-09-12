@@ -6,6 +6,10 @@ import android.net.Network
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.openchatai.app.OpenChatApp
+import com.openchatai.app.ai.ModelTester
+import com.openchatai.app.ai.OllamaDiag
+import com.openchatai.app.ai.OllamaProvider
+import com.openchatai.app.ai.OllamaStartResult
 import com.openchatai.app.background.GenerationManagerProvider
 import com.openchatai.app.background.SessionGenState
 import com.openchai.core.agent.PermissionDecision
@@ -22,6 +26,7 @@ import com.openchai.core.settings.AppSettings
 import com.openchai.core.settings.EngineMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +54,36 @@ data class EngineStatus(
     val healthy: Boolean,
     val message: String
 )
+
+/**
+ * State uji model satu klik (Model Selector → tombol "Test").
+ *  - Running : pengujian berjalan (spinner + Cancel).
+ *  - Result  : sukses — balasan model + durasi.
+ *  - Failed  : gagal — error ringkas + detail penuh untuk "View details".
+ */
+sealed class ModelTestUi {
+    abstract val providerId: ProviderId
+    abstract val model: String
+
+    data class Running(
+        override val providerId: ProviderId,
+        override val model: String
+    ) : ModelTestUi()
+
+    data class Result(
+        override val providerId: ProviderId,
+        override val model: String,
+        val reply: String,
+        val durationMs: Long
+    ) : ModelTestUi()
+
+    data class Failed(
+        override val providerId: ProviderId,
+        override val model: String,
+        val error: String,
+        val detail: String?
+    ) : ModelTestUi()
+}
 
 /**
  * ViewModel chat multi-sesi: UI hanya menyiapkan data di store lalu memulai /
@@ -86,6 +121,22 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _providerStatus = MutableStateFlow<Map<ProviderId, ProviderStatus>>(emptyMap())
     val providerStatus: StateFlow<Map<ProviderId, ProviderStatus>> = _providerStatus.asStateFlow()
+
+    // Status Ollama khusus (diagnose /api/version + /api/tags): memberi beda
+    // tegas "Not running" vs "Connection error" untuk UI Model Selector.
+    private val _ollamaStatus =
+        MutableStateFlow(ProviderStatus(null, "Not checked"))
+    val ollamaStatus: StateFlow<ProviderStatus> = _ollamaStatus.asStateFlow()
+
+    /** True bila proses start `ollama serve` di sandbox sedang berjalan. */
+    private val _ollamaStarting = MutableStateFlow(false)
+    val ollamaStarting: StateFlow<Boolean> = _ollamaStarting.asStateFlow()
+
+    // Uji model satu klik (null = tidak ada pengujian aktif/hasil tampil).
+    private val _modelTest = MutableStateFlow<ModelTestUi?>(null)
+    val modelTest: StateFlow<ModelTestUi?> = _modelTest.asStateFlow()
+
+    private var modelTestJob: Job? = null
 
     private val _models = MutableStateFlow<Map<ProviderId, List<ModelInfo>>>(emptyMap())
     val models: StateFlow<Map<ProviderId, List<ModelInfo>>> = _models.asStateFlow()
@@ -129,9 +180,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            if (container.activeProject.value == null) {
-                container.activeProject.value = container.workspaceManager.listProjects().firstOrNull()
-            }
+            // CATATAN: TIDAK ada auto-pick proyek pertama di sini — pemulihan
+            // workspace aktif adalah tanggung jawab AppContainer.restore
+            // (settings.activeWorkspaceId) dan gating UI menunggu initState.
             refreshProjects()
             val convs = store.conversations()
             if (convs.isEmpty()) {
@@ -144,6 +195,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         observePlanApproval()
         registerNetworkCallback()
         refreshEngineStatus()
+        // Auto-deteksi Ollama saat aplikasi dibuka (status untuk Model Selector).
+        refreshOllamaStatus()
     }
 
     /** Derived plan approval (pola sama dengan isGenerating): combine 3 state. */
@@ -280,39 +333,55 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     // ------------------------------------------------------------------
 
     fun send(raw: String) {
-        val text = raw.trim()
-        if (text.isEmpty()) return
+        viewModelScope.launch { performSend(raw.trim()) }
+    }
+
+    /**
+     * Aksi cepat agent (Fix/Test/Build/Run/Debug/Explain/Review/Commit) dari
+     * menu ikon tools di header: pastikan mode engine AGENT (tool loop aktif)
+     * lalu kirim prompt terkait seperti pesan user biasa.
+     */
+    fun runAgentAction(name: String) {
+        val prompt = AGENT_ACTION_PROMPTS[name.trim()] ?: return
         viewModelScope.launch {
-            val convId = ensureConversation()
-            // Guard per-sesi: sesi lain tetap bisa mengirim saat sesi ini generating.
-            if (generationManager.isGenerating(convId)) return@launch
-
-            // Slash commands dijawab lokal sebagai assistant echo — tanpa generasi.
-            if (handleSlashCommand(convId, text)) return@launch
-
-            // Gating workspace: engine AGENT butuh folder proyek aktif.
-            if (settingsRepo.settings.value.engineMode == EngineMode.AGENT &&
-                container.activeProject.value == null
-            ) {
-                store.appendMessage(
-                    convId,
-                    ChatMessage(conversationId = convId, role = Role.USER, content = text)
-                )
-                appendLocalAssistant(
-                    convId,
-                    "Create a workspace first — pick a project folder.",
-                    isError = true
-                )
-                return@launch
+            if (settingsRepo.settings.value.engineMode != EngineMode.AGENT) {
+                settingsRepo.update { it.copy(engineMode = EngineMode.AGENT) }
             }
-
-            store.appendMessage(convId, ChatMessage(conversationId = convId, role = Role.USER, content = text))
-            _messages.value = store.messages(convId)
-            refreshConversations()
-            // Simpan mode izin run ini (dasar keputusan plan approval nanti).
-            lastRunMode.value = settingsRepo.settings.value.permissionMode
-            generationManager.start(convId)
+            performSend(prompt)
         }
+    }
+
+    private suspend fun performSend(text: String) {
+        if (text.isEmpty()) return
+        val convId = ensureConversation()
+        // Guard per-sesi: sesi lain tetap bisa mengirim saat sesi ini generating.
+        if (generationManager.isGenerating(convId)) return
+
+        // Slash commands dijawab lokal sebagai assistant echo — tanpa generasi.
+        if (handleSlashCommand(convId, text)) return
+
+        // Gating workspace: engine AGENT butuh folder proyek aktif.
+        if (settingsRepo.settings.value.engineMode == EngineMode.AGENT &&
+            container.activeProject.value == null
+        ) {
+            store.appendMessage(
+                convId,
+                ChatMessage(conversationId = convId, role = Role.USER, content = text)
+            )
+            appendLocalAssistant(
+                convId,
+                "Create a workspace first — pick a project folder.",
+                isError = true
+            )
+            return
+        }
+
+        store.appendMessage(convId, ChatMessage(conversationId = convId, role = Role.USER, content = text))
+        _messages.value = store.messages(convId)
+        refreshConversations()
+        // Simpan mode izin run ini (dasar keputusan plan approval nanti).
+        lastRunMode.value = settingsRepo.settings.value.permissionMode
+        generationManager.start(convId)
     }
 
     /**
@@ -588,6 +657,130 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             settingsRepo.update { it.copy(activeProvider = providerId, selectedModel = modelId) }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Ollama: diagnose, start di sandbox, dan uji model satu klik
+    // ------------------------------------------------------------------
+
+    /**
+     * Deteksi status Ollama via [OllamaProvider.diagnose] (/api/version +
+     * /api/tags, timeout pendek). Dipanggil otomatis saat app dibuka dan saat
+     * user menekan Retry/Start di Model Selector. Hasilnya membedakan tegas
+     * "Not running" (koneksi ditolak) dari "Connection error" (sebab lain).
+     */
+    fun refreshOllamaStatus() {
+        viewModelScope.launch {
+            val provider = container.providerRegistry.get(ProviderId.OLLAMA) as? OllamaProvider
+            if (provider == null) {
+                _ollamaStatus.value = ProviderStatus(false, "Ollama provider unavailable")
+                return@launch
+            }
+            val diag = try {
+                withContext(Dispatchers.IO) { provider.diagnose() }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _ollamaStatus.value = ProviderStatus(false, e.message ?: "Diagnosis failed")
+                return@launch
+            }
+            when (diag) {
+                is OllamaDiag.Running ->
+                    _ollamaStatus.value = ProviderStatus(
+                        true,
+                        "Connected · ${diag.modelCount} models" +
+                            (diag.version?.let { " · $it" } ?: "")
+                    )
+                is OllamaDiag.NotRunning ->
+                    _ollamaStatus.value = ProviderStatus(
+                        false,
+                        "Ollama is not reachable at ${diag.base} — is it running?"
+                    )
+                is OllamaDiag.Error ->
+                    _ollamaStatus.value = ProviderStatus(false, diag.reason)
+            }
+        }
+    }
+
+    /**
+     * Start `ollama serve` DI DALAM sandbox Linux embedded (bila READY dan
+     * ollama terpasang di rootfs) — bukan mock: benar-benar menjalankan proses
+     * via ProcessSupervisor. Setelah start, status & daftar model di-refresh.
+     */
+    fun startOllama() {
+        if (_ollamaStarting.value) return
+        viewModelScope.launch {
+            _ollamaStarting.value = true
+            try {
+                when (val r = container.ollamaLauncher.startAndAwait()) {
+                    is OllamaStartResult.Started -> refreshOllamaStatus()
+                    is OllamaStartResult.EnvNotReady ->
+                        _ollamaStatus.value = ProviderStatus(false, r.reason)
+                    is OllamaStartResult.NotInstalled ->
+                        _ollamaStatus.value = ProviderStatus(false, r.reason)
+                    is OllamaStartResult.Failed ->
+                        _ollamaStatus.value = ProviderStatus(false, r.reason)
+                }
+                // Daftar model ikut dicoba ulang setelah upaya start.
+                refreshProvider(ProviderId.OLLAMA)
+            } finally {
+                _ollamaStarting.value = false
+            }
+        }
+    }
+
+    /**
+     * Uji model satu klik: kirim prompt kecil via [ModelTester] dan publikasikan
+     * hasilnya ke [modelTest] (dialog di Model Selector). Pengujian berjalan di
+     * job terpisah — Cancel membatalkan job (tidak ada dialog zombie).
+     */
+    fun testModel(providerId: ProviderId, modelId: String) {
+        modelTestJob?.cancel()
+        _modelTest.value = ModelTestUi.Running(providerId, modelId)
+        modelTestJob = viewModelScope.launch {
+            val tester = ModelTester(container.providerRegistry, settingsRepo)
+            try {
+                val outcome = tester.test(providerId, modelId)
+                _modelTest.value =
+                    if (outcome.ok) {
+                        ModelTestUi.Result(providerId, modelId, outcome.reply, outcome.durationMs)
+                    } else {
+                        ModelTestUi.Failed(
+                            providerId, modelId,
+                            outcome.error ?: "Unknown error",
+                            outcome.detail ?: outcome.error
+                        )
+                    }
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (e: Exception) {
+                _modelTest.value = ModelTestUi.Failed(
+                    providerId, modelId,
+                    e.message ?: "Test failed", e.toString()
+                )
+            }
+        }
+    }
+
+    /** Tutup dialog uji + batalkan pengujian berjalan (jika ada). */
+    fun clearModelTest() {
+        modelTestJob?.cancel()
+        modelTestJob = null
+        _modelTest.value = null
+    }
+
+    private companion object {
+        /** Prompt aksi cepat agent — nama persis dipakai AgentActionsMenu (UI). */
+        val AGENT_ACTION_PROMPTS = mapOf(
+            "Fix" to "Find the error in this project, fix it, and verify the result.",
+            "Test" to "Run the project tests, summarize the failures, and propose fixes.",
+            "Build" to "Build the project, inspect every error, and fix them until the build succeeds.",
+            "Run" to "Run the project (start the dev server or main entry point), then report how to access it.",
+            "Debug" to "Reproduce the current bug, inspect logs and code, find the root cause, and fix it.",
+            "Explain" to "Explain the structure of this project in short bullets.",
+            "Review" to "Review the recent changes in this project and suggest improvements.",
+            "Commit" to "Create a clean git commit for the current changes with a good message."
+        )
     }
 
     // ------------------------------------------------------------------

@@ -47,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -77,13 +78,17 @@ private val QUICK_COMMANDS = listOf(
     "ls", "pwd", "git status", "node -v", "python3 --version", "df -h .", "ps | head"
 )
 
+/** Bentuk panel embedded (sudut atas membulat) — hanya dipakai wrapper. */
+private val PanelShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+
 /**
- * Panel terminal bawah (300dp): sesi shell interaktif + daftar proses
- * yang dikelola supervisor delegating (Linux READY → proot, else
- * [com.openchai.runtime.AndroidProcessManager]).
- * Header juga menampilkan status lingkungan Linux (chip) + tombol Ctrl+C;
- * bila lingkungan belum terpasang/tak didukung, banner ajakan setup tampil
- * di atas konten dan membuka [onOpenLinuxSetup].
+ * Panel terminal bawah (300dp) — WRAPPER kompatibilitas.
+ *
+ * Konten penuh sudah diekstrak ke [TerminalContent] agar bisa dipakai
+ * [TerminalActivity] (layar penuh). Wrapper dipertahankan agar pemakai lama
+ * tidak pecah; [onOpenLinuxSetup] tetap ada di signature demi kompatibilitas
+ * call site, tetapi banner status Linux di dalam konten kini informatif
+ * (tanpa navigasi) karena konten dipakai juga di Activity tanpa rute setup.
  * Tidak menampilkan apa pun bila [visible] == false.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,11 +102,49 @@ fun TerminalPanel(
     if (!visible) return
 
     val vm: TerminalViewModel = viewModel()
+    TerminalContent(
+        vm = vm,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(300.dp)
+            .shadow(elevation = 8.dp, shape = PanelShape, clip = true),
+        headerSlot = {
+            // Tombol collapse hanya relevan di mode panel embedded.
+            IconButton(onClick = onCollapse) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Tutup terminal")
+            }
+        }
+    )
+}
+
+/**
+ * Konten terminal penuh (tanpa bingkai/ukuran tetap) — dipakai [TerminalPanel]
+ * (embedded) dan [TerminalActivity] (layar penuh). [vm] disuplai pemanggil
+ * agar satu instance [TerminalViewModel] bisa dipakai bersama.
+ *
+ * Struktur:
+ *  - Header: judul + font +/− + Ctrl+C + Clear + [headerSlot] (opsional).
+ *  - Bar tab: pill status Linux (informatif) + chip sesi shell + "+ New" +
+ *    tab Processes.
+ *  - Banner status lingkungan Linux bila belum terpasang/tak didukung.
+ *  - Konten: shell interaktif (quick commands + output + input) atau daftar
+ *    proses terkelola (Stop/Restart + stdin REPL).
+ *
+ * Modifier [modifier] menentukan ukuran/bentuk akhir (wrapper: 300dp dengan
+ * sudut membulat + shadow; activity: fillMaxSize polos).
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TerminalContent(
+    vm: TerminalViewModel,
+    modifier: Modifier = Modifier,
+    headerSlot: (@Composable () -> Unit)? = null
+) {
     val settings by vm.settings.collectAsStateWithLifecycle()
     val sessions by vm.sessions.collectAsStateWithLifecycle()
     val processes by vm.processes.collectAsStateWithLifecycle()
     // Status lingkungan Linux: ikut menentukan rute delegating TerminalHost
-    // (READY → proot, else shell Android) + teks chip & banner di panel.
+    // (READY → proot, else shell Android) + teks pill & banner di konten.
     val linuxPhase by vm.linuxStatus.collectAsStateWithLifecycle()
 
     var selectedTab by remember { mutableStateOf(PanelTab.SHELL) }
@@ -109,7 +152,7 @@ fun TerminalPanel(
     var processOutputId by remember { mutableStateOf<String?>(null) }
     var input by remember { mutableStateOf("") }
 
-    // Buat satu sesi shell otomatis saat panel pertama kali tampil.
+    // Buat satu sesi shell otomatis saat konten pertama kali tampil.
     LaunchedEffect(Unit) {
         if (vm.sessions.value.isEmpty()) {
             selectedSessionId = vm.newSession()
@@ -133,12 +176,8 @@ fun TerminalPanel(
     }
 
     Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(300.dp),
-        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 8.dp
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surface
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
             // Border atas subtle.
@@ -170,7 +209,7 @@ fun TerminalPanel(
                 // Ctrl+C: kirim byte SIGINT (ETX) TANPA newline ke sesi aktif.
                 // Catatan: host legacy menambahkan newline otomatis (baris kosong
                 // setelah interrupt — tidak berbahaya); host Linux menulis
-                // byte mentah. Posisi: dekat font size / Clear / Collapse.
+                // byte mentah. Posisi: dekat font size / Clear / slot header.
                 TextButton(
                     onClick = { selectedSessionId?.let { vm.write(it, "\u0003") } },
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
@@ -180,13 +219,12 @@ fun TerminalPanel(
                 IconButton(onClick = { selectedSessionId?.let { vm.clear(it) } }) {
                     Icon(Icons.Filled.Clear, contentDescription = "Bersihkan output")
                 }
-                IconButton(onClick = onCollapse) {
-                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Tutup terminal")
-                }
+                // Slot header tambahan dari pemanggil (wrapper: tombol collapse).
+                headerSlot?.invoke()
             }
 
-            // Tab sesi + aksi (+ chip status Linux di bar header kedua — dipilih
-            // agar tidak overflow pada layar sempit; bar ini sudah scrollable).
+            // Tab sesi + aksi (+ pill status Linux di bar kedua — dipilih agar
+            // tidak overflow pada layar sempit; bar ini sudah scrollable).
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -195,23 +233,25 @@ fun TerminalPanel(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Chip status Linux: klik → buka layar setup lingkungan Linux.
-                AssistChip(
-                    onClick = onOpenLinuxSetup,
-                    label = {
-                        Text(
-                            text = if (linuxPhase == LinuxEnvPhase.READY) "Linux: aktif"
-                            else "Linux: shell Android",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (linuxPhase == LinuxEnvPhase.READY) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                            maxLines = 1
-                        )
-                    }
-                )
+                // Pill status Linux: informatif — konten ini juga dipakai
+                // TerminalActivity yang tidak punya rute layar setup.
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                ) {
+                    Text(
+                        text = if (linuxPhase == LinuxEnvPhase.READY) "Linux: aktif"
+                        else "Linux: shell Android",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (linuxPhase == LinuxEnvPhase.READY) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
                 sessions.forEachIndexed { index, session ->
                     FilterChip(
                         selected = selectedTab == PanelTab.SHELL &&
@@ -246,24 +286,23 @@ fun TerminalPanel(
                 )
             }
 
-            // Banner ajakan setup lingkungan Linux (di atas konten, hanya bila
-            // belum terpasang / perangkat tidak didukung).
+            // Banner status lingkungan Linux (di atas konten, hanya bila belum
+            // terpasang / perangkat tidak didukung) — informatif, tanpa klik.
             when (linuxPhase) {
                 LinuxEnvPhase.NOT_INSTALLED -> LinuxSetupBanner(
                     text = "Lingkungan Linux belum terpasang — terminal memakai shell " +
-                        "Android terbatas. Ketuk untuk pasang Ubuntu (apt/node/python).",
+                        "Android terbatas. Buka Settings → Lingkungan Linux untuk pasang " +
+                        "Ubuntu (apt/node/python).",
                     container = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                     icon = Icons.Filled.Info,
-                    iconTint = MaterialTheme.colorScheme.primary,
-                    onClick = onOpenLinuxSetup
+                    iconTint = MaterialTheme.colorScheme.primary
                 )
                 LinuxEnvPhase.NOT_SUPPORTED -> LinuxSetupBanner(
                     text = "Perangkat tidak mendukung lingkungan Linux: " +
                         vm.linuxCapability.reason,
                     container = TerminalYellow.copy(alpha = 0.18f),
                     icon = Icons.Filled.Warning,
-                    iconTint = TerminalYellow,
-                    onClick = onOpenLinuxSetup
+                    iconTint = TerminalYellow
                 )
                 else -> Unit
             }
@@ -471,20 +510,29 @@ fun TerminalPanel(
     }
 }
 
-/** Banner tipis ajakan setup Linux (klik → layar setup). */
+/**
+ * Banner tipis status lingkungan Linux. [onClick] opsional: bila null (konteks
+ * tanpa rute setup, mis. TerminalActivity) banner murni informatif.
+ */
 @Composable
 private fun LinuxSetupBanner(
     text: String,
     container: Color,
     icon: ImageVector,
     iconTint: Color,
-    onClick: () -> Unit
+    onClick: (() -> Unit)? = null
 ) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clickable(onClick = onClick),
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                }
+            ),
         shape = RoundedCornerShape(10.dp),
         color = container
     ) {

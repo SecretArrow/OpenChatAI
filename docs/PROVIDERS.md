@@ -13,6 +13,27 @@ Open Chat AI mendukung tujuh jenis provider. Pilih lewat **model selector di lay
 | **Poolside** | Cloud/self-host | Ya | Endpoint kompatibel OpenAI |
 | **Custom** | Cloud/self-host | Ya | Base URL OpenAI-compatible apa pun |
 
+## Ollama: status, start, dan uji model
+
+Sejak v1.9.0, Model Selector (dan deteksi saat app dibuka) membedakan tiga kondisi Ollama — bukan sekadar error mentah:
+
+```text
+Ollama
+● Connected · 3 models · 0.5.7
+
+Ollama
+● Not running — Ollama is not reachable at http://127.0.0.1:11434
+[Start Ollama]  [Retry]
+
+Ollama
+● Connection error: <sebab ringkas>
+[Retry]  (View details menampilkan pesan penuh)
+```
+
+- **Daftar model diambil langsung dari Ollama** (`GET /api/tags`) — tidak ada nama model hardcoded. Bila Ollama mengembalikan `qwen3:0.6b`, model itu muncul di selector dan bisa langsung dipilih.
+- **Start Ollama** menjalankan `ollama serve` **di dalam sandbox Linux embedded** (bila Linux READY dan ollama terpasang di rootfs — lihat [LINUX_ENV.md](LINUX_ENV.md)); proses dikelola Process Supervisor (tidak dobel-start, output dipantau).
+- **Tombol Test** per model mengirim prompt kecil (`Reply with exactly: OK`), menampilkan balasan + durasi saat sukses, atau "Model test failed" + **Reason** + **[View details]** (error lengkap) + [Retry] saat gagal. Timeout bawaan 30 detik; pengujian dapat dibatalkan.
+
 ## Model list dinamis per base URL
 
 Layar provider menampilkan **daftar model yang benar-benar dimiliki endpoint** — ditarik dari base URL masing-masing (`GET /v1/models` untuk OpenAI-compatible, `/api/tags` untuk Ollama, endpoint model list untuk Anthropic/Google). Jadi:
@@ -22,7 +43,6 @@ Layar provider menampilkan **daftar model yang benar-benar dimiliki endpoint** �
 - Bila endpoint tidak bisa dihubungi, status koneksi ditampilkan jelas + fallback ke input manual.
 
 ## Penyimpanan API key
-
 - API key disimpan di **EncryptedSharedPreferences** (kunci di Android Keystore) — tidak pernah ditulis plaintext, tidak pernah dikirim ke mana pun selain endpoint provider terkait.
 - Mengganti atau menghapus key memicu konfirmasi visual (Toast/Dialog) yang menyatakan konfigurasi berubah.
 - Key **tidak pernah masuk** ke repo, log, atau file ekspor chat.

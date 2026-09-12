@@ -20,6 +20,14 @@ interface WorkspaceFs {
     /** True bila workspace ini mendukung eksekusi shell di root (backend File). */
     val supportsShell: Boolean
 
+    /**
+     * Path host yang bisa di-bind ke sandbox Linux (proot) sebagai
+     * /home/user/workspace — null bila tidak bisa, mis. SAF non-primary.
+     * Dipakai agent/terminal agar command berjalan PADA workspace Android
+     * asli, bukan pada salinan di dalam rootfs.
+     */
+    val hostBindPath: String? get() = null
+
     fun listFiles(relPath: String): String
 
     fun readFile(relPath: String): String

@@ -19,6 +19,14 @@ class FileWorkspaceFs(private val rootPath: String) : WorkspaceFs {
 
     override val supportsShell: Boolean = true
 
+    /**
+     * Backend java.io.File → root selalu direktori host nyata sehingga bisa
+     * di-bind langsung ke sandbox proot (command agent berjalan di root ini).
+     * Root blank → null (tidak ada yang bisa di-bind).
+     */
+    override val hostBindPath: String? =
+        if (rootPath.isBlank()) null else File(rootPath).absolutePath
+
     override fun listFiles(relPath: String): String =
         AgentTools.listFiles(rootPath, relPath)
 

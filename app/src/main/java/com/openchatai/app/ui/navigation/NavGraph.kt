@@ -20,6 +20,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -38,7 +39,6 @@ import com.openchatai.app.ui.runtime.RuntimeScreen
 import com.openchatai.app.ui.sessions.SessionsDrawer
 import com.openchatai.app.ui.settings.SettingsScreen
 import com.openchatai.app.ui.workspace.WorkspaceSetupScreen
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 object Routes {
@@ -84,12 +84,13 @@ fun AppNavGraph(container: AppContainer) {
         }
     }
 
-    // Gating first-run: chat Agent mode WAJIB workspace aktif. Beri jeda singkat
-    // agar restore workspace di AppContainer (DataStore async) sempat jalan;
-    // bila tetap kosong → arahkan ke layar setup workspace.
-    LaunchedEffect(Unit) {
-        delay(400)
-        if (container.activeProject.value == null) {
+    // Gating first-run: chat Agent mode WAJIB workspace aktif. Tunggu sinyal
+    // initState dari AppContainer (snapshot settings pertama + attempt restore
+    // SELESAI) — menggantikan delay(400) heuristik yang rapuh; navigasi hanya
+    // bila setelah restore tetap belum ada workspace aktif → layar setup.
+    val initState by container.initState.collectAsStateWithLifecycle()
+    LaunchedEffect(initState) {
+        if (initState && container.activeProject.value == null) {
             navController.navigate(Routes.WORKSPACE_SETUP) {
                 // Start destination (Chat) tetap di back stack — back dari setup
                 // kembali ke Chat yang menampilkan ajakan membuka setup lagi.

@@ -27,8 +27,10 @@ Aktivitas agent tampil manusiawi di chat (`✓ Analyzing project`, `⏳ Installi
 
 ### run_command
 
-- Saat Linux embedded READY: dieksekusi **di dalam sandbox Ubuntu** (proot), cwd `/home/user/workspace`; stdout/stderr/exit code dikembali ke agent (lihat [LINUX_ENV.md](LINUX_ENV.md)).
+- Saat Linux embedded READY: dieksekusi **di dalam sandbox Ubuntu** (proot) dengan **workspace Android di-bind ke `/home/user/workspace`** — cwd = folder project asli, sehingga scaffold/build berdampak pada file nyata (lihat [LINUX_ENV.md](LINUX_ENV.md)).
+- Workspace SAF: didukung bila foldernya di storage utama (path fisik dapat di-bind); selain itu agent diarahkan memakai file tools dengan pesan yang jelas.
 - Selain itu: fallback ke shell Android dengan blocklist perintah berbahaya (`rm -rf /`, fork bomb, dll.).
+- Output command tersimpan pada detail langkah — tampil via **View execution details** (collapsible), tidak memenuhi chat.
 
 ## MCP (Model Context Protocol)
 
@@ -55,3 +57,7 @@ Cocok untuk "paket kemampuan" — mis. plugin QA (MCP browser + skill code revie
 ## Slash commands
 
 Di kolom chat: `/fix`, `/test`, `/commit`, `/explain`, `/review` — satu ketukan mengisi prompt lengkap siap kirim.
+
+## Agent actions menu (v1.9.0)
+
+Ikon **tools (kunci inggris)** di header chat membuka menu satu pintu: **Fix, Test, Build, Run, Debug, Explain, Review, Commit** — memilih salah satu otomatis mengaktifkan mode engine AGENT lalu mengirim prompt terkait. Chat tidak dipenuhi tombol; semua aksi lanjutan cukup dari satu ikon.

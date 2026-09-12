@@ -143,7 +143,8 @@ class BuiltInAgent(
                     val label = humanize(tc.name, tc.args)
                     emit(AgentEvent.StepUpdated(AgentStep(label, StepState.RUNNING)))
                     val result = executeTool(tc.name, tc.args, fs, workspace, s, perm)
-                    emit(AgentEvent.StepUpdated(AgentStep(label, StepState.DONE, detail = summarize(result))))
+                    // Detail penuh (dipotong 2000 char) — UI menampilkan collapsible.
+                    emit(AgentEvent.StepUpdated(AgentStep(label, StepState.DONE, detail = result.take(2000))))
                     chatTail.add("user" to "TOOL_RESULT $label:\n$result")
                 }
             }
@@ -309,9 +310,20 @@ class BuiltInAgent(
                     else fs?.search(query) ?: AgentTools.search(workspace, query)
                 }
                 "run_command" -> {
-                    if (fs != null && !fs.supportsShell) {
-                        return "ERROR: run_command is unavailable for picked-folder (SAF) " +
-                            "workspaces — use the file tools instead."
+                    // cwd host: bind path dari fs (app-dir / SAF primary storage)
+                    // agar command berjalan PADA workspace asli; bila tidak ada,
+                    // pakai legacy workspace (path host langsung).
+                    val shellCwd = fs?.hostBindPath ?: workspace
+                    // SAF non-primary TANPA pemetaan bind DAN tanpa legacy path:
+                    // tidak ada tempat sah untuk mengeksekusi command → error jelas.
+                    // SAF dengan bind path TETAP BOLEH jalan (di bind itu).
+                    if (fs != null && !fs.supportsShell && fs.hostBindPath == null &&
+                        workspace.isBlank()
+                    ) {
+                        return "ERROR: run_command unavailable for this SAF workspace " +
+                            "(not on primary storage) — use an app-private or " +
+                            "primary-storage workspace for shell commands, or use " +
+                            "the file tools."
                     }
                     // Legacy (tanpa permission context): tetap dijaga auto-approve.
                     if (perm == null && !s.autoApproveCommands) {
@@ -322,7 +334,7 @@ class BuiltInAgent(
                     if (command.isNullOrBlank()) {
                         "ERROR: run_command requires a 'command' argument."
                     } else {
-                        val res = runner.run(command, workspace, 120_000L)
+                        val res = runner.run(command, shellCwd, 120_000L)
                         val combined = buildString {
                             append(res.stdout)
                             if (res.stderr.isNotBlank()) {
@@ -465,9 +477,6 @@ class BuiltInAgent(
 
     private fun labelPath(args: JsonObject, key: String): String =
         args.jsonStr(key)?.trim()?.take(80)?.ifBlank { null } ?: "(unspecified)"
-
-    private fun summarize(result: String): String =
-        result.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(80) ?: "done"
 
     private companion object {
         const val MAX_COMMAND_OUTPUT = 4000

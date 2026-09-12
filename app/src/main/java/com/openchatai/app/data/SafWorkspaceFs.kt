@@ -5,6 +5,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.provider.DocumentsContract
 import com.openchai.core.data.WorkspaceFs
+import java.io.File
 
 /**
  * Implementasi [WorkspaceFs] untuk workspace dari folder pilihan user
@@ -48,6 +49,26 @@ class SafWorkspaceFs(context: Context, private val treeUriString: String) : Work
     private val rootDocUri: Uri by lazy { docUri(rootDocId) }
 
     override val supportsShell: Boolean = false
+
+    /**
+     * Bind host hanya mungkin bila tree berada di penyimpanan primer
+     * (documentId berprefix "primary:") yang punya pemetaan path langsung ke
+     * "/storage/emulated/0/<sisa-path>" (documentId di-URI-decode karena
+     * segmen di-encode provider). Return HANYA bila direktori hasil pemetaan
+     * benar-benar ada ([File.isDirectory]); tree di storage/provider lain atau
+     * path tak terpetakan → null (command shell tidak tersedia untuk root ini).
+     */
+    override val hostBindPath: String? by lazy {
+        try {
+            if (!rootDocId.startsWith("primary:")) return@lazy null
+            val rest = Uri.decode(rootDocId.removePrefix("primary:")).trim('/')
+            val candidate =
+                if (rest.isEmpty()) "/storage/emulated/0" else "/storage/emulated/0/$rest"
+            if (File(candidate).isDirectory) candidate else null
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /**
      * Label root untuk prompt: "<nama tree>/<nama workspace>".
