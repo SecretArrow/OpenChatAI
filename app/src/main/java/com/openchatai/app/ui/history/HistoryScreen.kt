@@ -14,13 +14,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -34,6 +37,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -46,8 +52,11 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Riwayat percakapan: pencarian, pengelompokan Today / Yesterday /
- * Previous 7 days / Older, membuka percakapan, dan menghapusnya.
+ * Riwayat percakapan — Material 3: pencarian (OutlinedTextField), daftar grup
+ * Today / Yesterday / Previous 7 days / Older berupa ListItem di dalam Surface
+ * membulat (judul titleMedium, waktu labelMedium), membuka percakapan, dan
+ * menghapusnya (ikon DeleteOutline). Empty state memakai ikon History besar +
+ * teks headlineSmall.
  */
 @Composable
 fun HistoryScreen(
@@ -99,7 +108,11 @@ fun HistoryScreen(
                 chatViewModel.createNewConversation()
                 onOpenConversation()
             }) {
-                Icon(Icons.Filled.Add, contentDescription = null)
+                Icon(
+                    Icons.Rounded.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
                 Spacer(Modifier.width(4.dp))
                 Text("New chat")
             }
@@ -113,10 +126,17 @@ fun HistoryScreen(
                 .padding(horizontal = 16.dp, vertical = 6.dp),
             singleLine = true,
             placeholder = { Text("Search conversations…") },
-            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) }
+            leadingIcon = {
+                Icon(
+                    Icons.Rounded.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         )
 
         if (filtered.isEmpty()) {
+            // Empty state M3: ikon History besar + pesan headlineSmall.
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -124,14 +144,22 @@ fun HistoryScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
+                Icon(
+                    Icons.Outlined.History,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(56.dp)
+                )
+                Spacer(Modifier.size(16.dp))
                 Text(
                     text = if (query.isBlank()) {
                         "Belum ada percakapan.\nMulai chat baru — agent siap membantu."
                     } else {
                         "Tidak ada hasil untuk \"$query\"."
                     },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
                 )
             }
         } else {
@@ -167,6 +195,11 @@ fun HistoryScreen(
     }
 }
 
+/**
+ * Satu baris percakapan: Surface membulat berisi ListItem M3 — leading ikon
+ * History tonal, judul titleMedium, waktu labelMedium onSurfaceVariant,
+ * trailing spinner (saat generating) + tombol hapus DeleteOutline.
+ */
 @Composable
 private fun ConversationRow(
     conversation: Conversation,
@@ -177,55 +210,85 @@ private fun ConversationRow(
 ) {
     Surface(
         shape = MaterialTheme.shapes.medium,
+        // Baris aktif = primaryContainer; lainnya surfaceContainerLow.
         color = if (isActive) {
             MaterialTheme.colorScheme.primaryContainer
         } else {
-            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            MaterialTheme.colorScheme.surfaceContainerLow
         },
         modifier = Modifier
             .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
             .clickable(onClick = onOpen)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Filled.DateRange,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
+        ListItem(
+            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            leadingContent = {
+                // Leading ikon tonal: kotak kecil berisi ikon History.
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = if (isActive) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    }
+                ) {
+                    Icon(
+                        Icons.Rounded.History,
+                        contentDescription = null,
+                        tint = if (isActive) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier
+                            .padding(6.dp)
+                            .size(18.dp)
+                    )
+                }
+            },
+            headlineContent = {
                 Text(
                     text = conversation.title,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (isActive) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            },
+            supportingContent = {
                 Text(
                     text = "Updated " + formatTime(conversation.updatedAt),
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            },
+            trailingContent = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Indikator kecil sesi yang sedang generating di background.
+                    if (isGenerating) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                    IconButton(onClick = onDelete) {
+                        Icon(
+                            Icons.Outlined.DeleteOutline,
+                            contentDescription = "Delete conversation",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
-            // Indikator kecil sesi yang sedang generating di background.
-            if (isGenerating) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .padding(end = 8.dp)
-                        .size(12.dp),
-                    strokeWidth = 2.dp
-                )
-            }
-            IconButton(onClick = onDelete) {
-                Icon(
-                    Icons.Filled.Delete,
-                    contentDescription = "Delete conversation",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+        )
     }
 }
 

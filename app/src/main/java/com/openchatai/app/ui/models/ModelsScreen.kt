@@ -2,13 +2,19 @@ package com.openchatai.app.ui.models
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,19 +23,25 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.SmartToy
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -44,11 +56,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.openchatai.app.ui.components.StatusDot
+import com.openchatai.app.ui.theme.AppMotion
 import com.openchai.core.llm.ModelManager
 import com.openchai.core.llm.humanBytes
 import java.io.File
@@ -62,7 +76,12 @@ import java.io.File
  *  - Katalog GGUF: tombol Download; saat berjalan progress MB + Pause; saat
  *    dijeda Resume/Discard; Retry otomatis melanjutkan dari part tersisa;
  *    part tertinggal setelah proses mati ditawarkan "Resume (ukuran)".
+ *
+ * Visual Material 3: Scaffold + CenterAlignedTopAppBar, kartu model dengan
+ * ikon SmartToy tonal, meta model sebagai AssistChip, status terpasang
+ * CheckCircle, tombol unduh FilledTonalButton, motion AppMotion.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelsScreen(
     onOpenChat: () -> Unit,
@@ -124,30 +143,42 @@ fun ModelsScreen(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // ---------------- Header ----------------
-            Text(
-                "Models",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 2.dp)
+    Scaffold(
+        modifier = modifier,
+        // Inset ditangani Scaffold luar (NavGraph) — cegah padding ganda.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            // App bar M3 terpusat — layar tab top-level.
+            CenterAlignedTopAppBar(
+                title = { Text("Models") }
             )
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
             Text(
                 "On-device AI (llama.cpp) — download a GGUF model once, chat offline after that.",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
             RecommendationBanner(vm.recommendationText())
 
-            // Indikator transfer (impor/ekspor) sedang berjalan.
-            if (reported?.phase == ModelManager.TransferPhase.RUNNING) {
-                TransferIndicator(reported.message)
+            // Indikator transfer (impor/ekspor) sedang berjalan — muncul/hilang
+            // dengan motion M3 (fade + expand via token AppMotion).
+            AnimatedVisibility(
+                visible = reported?.phase == ModelManager.TransferPhase.RUNNING,
+                enter = fadeIn(AppMotion.standardTween()) +
+                    expandVertically(AppMotion.standardTween()),
+                exit = fadeOut(AppMotion.standardTween()) +
+                    shrinkVertically(AppMotion.standardTween())
+            ) {
+                TransferIndicator(reported?.message)
             }
 
             LazyColumn(
@@ -167,7 +198,7 @@ fun ModelsScreen(
                             onClick = { importLauncher.launch(arrayOf("*/*")) }
                         ) {
                             Icon(
-                                Icons.Filled.Add,
+                                Icons.Rounded.Add,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -187,14 +218,14 @@ fun ModelsScreen(
                 } else {
                     item {
                         ElevatedCard(
-                            shape = RoundedCornerShape(16.dp),
+                            shape = MaterialTheme.shapes.medium,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                                 installed.forEachIndexed { index, file ->
                                     if (index > 0) {
                                         HorizontalDivider(
-                                            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                            color = MaterialTheme.colorScheme.outlineVariant,
                                             modifier = Modifier.padding(vertical = 10.dp)
                                         )
                                     }
@@ -231,12 +262,6 @@ fun ModelsScreen(
                 }
             }
         }
-
-        // Snackbar hasil impor/ekspor (di atas bottom area screen).
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
     }
 
     // ---------------- Konfirmasi hapus ----------------
@@ -262,6 +287,7 @@ fun ModelsScreen(
     }
 }
 
+/** Judul section kecil berwarna primary (uppercase) — pola label M3. */
 @Composable
 private fun SectionTitle(title: String) {
     Text(
@@ -272,6 +298,28 @@ private fun SectionTitle(title: String) {
     )
 }
 
+/**
+ * Ikon dalam wadah tonal (surfaceContainerHigh, bentuk membulat) — pola kartu
+ * model M3: setiap model punya anchor visual SmartToy.
+ */
+@Composable
+private fun TonalIcon(icon: ImageVector, modifier: Modifier = Modifier) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .padding(8.dp)
+                .size(20.dp)
+        )
+    }
+}
+
 /** Banner rekomendasi RAM — gaya sama dengan StatusBanner di ChatScreen. */
 @Composable
 private fun RecommendationBanner(text: String) {
@@ -279,8 +327,8 @@ private fun RecommendationBanner(text: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -304,10 +352,14 @@ private fun TransferIndicator(message: String?) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .animateContentSize(AppMotion.standardTween())
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusDot(MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(8.dp))
@@ -318,12 +370,13 @@ private fun TransferIndicator(message: String?) {
                 )
             }
             Spacer(Modifier.height(8.dp))
+            // Indeterminate memakai gaya default M3.
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
     }
 }
 
-/** Baris model terpasang: nama, ukuran, badge aktif, tombol Use / Export / Delete. */
+/** Baris model terpasang: ikon tonal, nama, ukuran, badge aktif, aksi model. */
 @Composable
 private fun InstalledRow(
     file: File,
@@ -336,6 +389,8 @@ private fun InstalledRow(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        TonalIcon(Icons.Rounded.SmartToy)
+        Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 file.name,
@@ -346,12 +401,18 @@ private fun InstalledRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     humanBytes(file.length()),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (isActive) {
                     Spacer(Modifier.width(8.dp))
-                    StatusDot(MaterialTheme.colorScheme.primary, size = 6.dp)
+                    // Status aktif: ikon CheckCircle (M3) + label kecil.
+                    Icon(
+                        Icons.Rounded.CheckCircle,
+                        contentDescription = "Model aktif",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
                     Spacer(Modifier.width(4.dp))
                     Text(
                         "Active",
@@ -362,26 +423,27 @@ private fun InstalledRow(
             }
         }
         if (!isActive) {
-            TextButton(onClick = onUse) { Text("Use") }
+            FilledTonalButton(onClick = onUse) { Text("Use") }
         }
         TextButton(onClick = onExport) { Text("Export") }
         IconButton(onClick = onDelete) {
             Icon(
-                Icons.Filled.Delete,
+                Icons.Rounded.Delete,
                 contentDescription = "Delete model",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                tint = MaterialTheme.colorScheme.error
             )
         }
     }
 }
 
 /**
- * Baris katalog: info model + matriks aksi unduhan:
+ * Kartu katalog model: ikon SmartToy tonal + nama + meta (quant/ukuran/family
+ * sebagai AssistChip) + deskripsi + matriks aksi unduhan:
  *  - DOWNLOADING → progress bar + "x / y" + Pause,
  *  - PAUSED → Resume + "Paused · x / y" + Discard (buang part),
- *  - FAILED → Retry (auto-resume dari part) + pesan error,
+ *  - FAILED → Retry (auto-resume dari part) + blok error,
  *  - ada part tapi tanpa state aktif (proses mati) → Resume (ukuran) + Discard,
- *  - terpasang → "Installed ✓"; selain itu → Download.
+ *  - terpasang → status CheckCircle; selain itu → Download.
  */
 @Composable
 private fun CatalogRow(
@@ -393,20 +455,58 @@ private fun CatalogRow(
     onPause: () -> Unit,
     onCancel: () -> Unit
 ) {
-    ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+    ElevatedCard(
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .animateContentSize(AppMotion.standardTween())
+    ) {
         Column(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(model.name, style = MaterialTheme.typography.titleMedium)
-            Text(
-                "${model.quant} · ${humanBytes(model.sizeBytes)} · ${model.family}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TonalIcon(Icons.Rounded.SmartToy)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    model.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            // Meta model sebagai AssistChip M3 (quant, ukuran, family) —
+            // bisa digulir horizontal bila layar sempit.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                AssistChip(
+                    onClick = { /* chip meta tanpa aksi */ },
+                    label = {
+                        Text(model.quant, style = MaterialTheme.typography.labelMedium)
+                    }
+                )
+                AssistChip(
+                    onClick = { /* chip meta tanpa aksi */ },
+                    label = {
+                        Text(
+                            humanBytes(model.sizeBytes),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                )
+                AssistChip(
+                    onClick = { /* chip meta tanpa aksi */ },
+                    label = {
+                        Text(model.family, style = MaterialTheme.typography.labelMedium)
+                    }
+                )
+            }
             Text(
                 model.description,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
@@ -419,9 +519,11 @@ private fun CatalogRow(
                     if (fraction != null) {
                         LinearProgressIndicator(
                             progress = { fraction },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                         )
                     } else {
+                        // Indeterminate memakai gaya default M3.
                         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                     }
                     Row(
@@ -430,7 +532,7 @@ private fun CatalogRow(
                     ) {
                         Text(
                             "${humanBytes(st.progressBytes)} / ${humanBytes(st.totalBytes)}",
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
                         )
@@ -441,39 +543,68 @@ private fun CatalogRow(
                 st != null && st.state == ModelManager.DownloadPhase.PAUSED -> {
                     Text(
                         "Paused · ${humanBytes(st.progressBytes)} / ${humanBytes(st.totalBytes)}",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = onDownload) { Text("Resume") }
+                        FilledTonalButton(onClick = onDownload) { Text("Resume") }
                         Spacer(Modifier.width(8.dp))
                         TextButton(onClick = onCancel) { Text("Discard") }
                     }
                 }
 
                 st != null && st.state == ModelManager.DownloadPhase.FAILED -> {
-                    Text(
-                        st.error ?: "Download failed",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error
-                    )
+                    // Blok error M3: errorContainer + WarningAmber + onErrorContainer.
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Icon(
+                                Icons.Rounded.WarningAmber,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                st.error ?: "Download failed",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                    }
                     // Retry memanggil download lagi — part tersisa dipakai resume.
-                    Button(onClick = onDownload) { Text("Retry") }
+                    FilledTonalButton(onClick = onDownload) { Text("Retry") }
                 }
 
                 isInstalled -> {
-                    Text(
-                        "Installed ✓",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    // Status terpasang: ikon CheckCircle + teks primary.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Installed",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
 
                 // Proses mati saat mengunduh: state hilang tapi part masih ada
                 // → tawarkan lanjutkan unduhan (ukuran part dalam kurung).
                 resumableBytes != null && resumableBytes > 0L -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Button(onClick = onDownload) {
+                        FilledTonalButton(onClick = onDownload) {
                             Text("Resume (${humanBytes(resumableBytes)})")
                         }
                         Spacer(Modifier.width(8.dp))
@@ -482,7 +613,7 @@ private fun CatalogRow(
                 }
 
                 else -> {
-                    Button(onClick = onDownload) { Text("Download") }
+                    FilledTonalButton(onClick = onDownload) { Text("Download") }
                 }
             }
         }

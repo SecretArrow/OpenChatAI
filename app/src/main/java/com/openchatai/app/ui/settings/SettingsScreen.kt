@@ -2,9 +2,16 @@ package com.openchatai.app.ui.settings
 
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -12,31 +19,45 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Done
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Done
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.OpenInNew
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,13 +66,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.openchatai.app.ui.components.StatusDot
+import com.openchatai.app.ui.theme.AppMotion
 import com.openchai.core.agent.PermissionMode
 import com.openchai.core.model.ProviderId
 import com.openchai.core.settings.AppSettings
@@ -62,7 +86,14 @@ import kotlin.math.roundToInt
 /**
  * Halaman Settings: provider AI, OpenCode engine, agent, terminal,
  * appearance, dan status runtime. Tanpa bottom bar sendiri.
+ *
+ * Overhaul Material 3 (visual-only — kontrak parameter & logika tidak berubah):
+ * - Scaffold + TopAppBar "Pengaturan".
+ * - Seksi dipisah judul headlineSmall + OutlinedCard berisi baris ListItem M3.
+ * - Pemilih tema & density memakai SegmentedButton M3.
+ * - Ikon Rounded, warna dari colorScheme, tipografi M3, motion token [AppMotion].
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
@@ -82,20 +113,27 @@ fun SettingsScreen(
         vm.runtimeStatus { runtimeRows = it }
     }
 
-    Column(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        Text(
-            "Settings",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp)
-        )
+    // CATATAN INSET: layar ini hidup di dalam Scaffold NavGraph — padding status
+    // bar & bottom bar sudah dipenuhi parent, jadi window insets di-nol-kan di
+    // sini agar TopAppBar tidak menambah jarak ganda di bawah status bar.
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            TopAppBar(
+                title = { Text("Pengaturan") },
+                windowInsets = WindowInsets(0, 0, 0, 0)
+            )
+        }
+    ) { innerPadding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.fillMaxSize().padding(innerPadding),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             // ------------------------------------------------------------
             item {
-                SectionCard("AI PROVIDER") {
+                SectionCard("AI Provider") {
                     val provider = settings.activeProvider
                     ProviderChips(provider) { selected ->
                         vm.update { it.copy(activeProvider = selected) }
@@ -130,7 +168,14 @@ fun SettingsScreen(
                                     vm.update { copyEndpoint(it, provider, agentRouterEndpoint(provider)) }
                                     Toast.makeText(context, "URL tersimpan", Toast.LENGTH_SHORT).show()
                                 },
-                                label = { Text("Preset: AgentRouter") }
+                                label = { Text("Preset: AgentRouter") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.Link,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             )
                         }
                     }
@@ -143,7 +188,14 @@ fun SettingsScreen(
                                     vm.update { copyEndpoint(it, provider, POOLSIDE_PRESET_ENDPOINT) }
                                     Toast.makeText(context, "URL tersimpan", Toast.LENGTH_SHORT).show()
                                 },
-                                label = { Text("Preset: Poolside") }
+                                label = { Text("Preset: Poolside") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.Link,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             )
                         }
                     }
@@ -173,7 +225,7 @@ fun SettingsScreen(
                                 }
                                 apiKeyInput = ""
                             }) {
-                                Icon(Icons.Filled.Done, contentDescription = "Save API key")
+                                Icon(Icons.Rounded.Done, contentDescription = "Save API key")
                             }
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -199,50 +251,33 @@ fun SettingsScreen(
             }
             // ------------------------------------------------------------
             item {
-                SectionCard("RUNTIME & MODUL") {
-                    // Row klikable → buka layar Runtime & Modul (kelola pack).
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenRuntime),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Filled.Info, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text("Runtime & Modul", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "Kelola runtime llama.cpp & modul — pasang/hapus, jeda/lanjut unduhan",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                SectionCard("Runtime & Modul") {
+                    // Baris navigasi M3 (ListItem) → buka layar Runtime & Modul.
+                    NavRow(
+                        icon = Icons.Rounded.Info,
+                        title = "Runtime & Modul",
+                        subtitle = "Kelola runtime llama.cpp & modul — pasang/hapus, jeda/lanjut unduhan",
+                        onClick = onOpenRuntime
+                    )
                 }
             }
             // ------------------------------------------------------------
             item {
-                SectionCard("LINGKUNGAN LINUX") {
-                    // Row klikable → buka layar setup Linux (proot + rootfs Ubuntu).
-                    Row(
-                        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpenLinuxSetup),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Filled.Build, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Column {
-                            Text("Lingkungan Linux", style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                "Pasang Ubuntu userspace (proot) — apt, nodejs, npm, " +
-                                    "python3 di dalam sandbox. Tanpa root.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
+                SectionCard("Lingkungan Linux") {
+                    // Baris navigasi M3 (ListItem) → buka layar setup Linux
+                    // (proot + rootfs Ubuntu).
+                    NavRow(
+                        icon = Icons.Rounded.Terminal,
+                        title = "Lingkungan Linux",
+                        subtitle = "Pasang Ubuntu userspace (proot) — apt, nodejs, npm, " +
+                            "python3 di dalam sandbox. Tanpa root.",
+                        onClick = onOpenLinuxSetup
+                    )
                 }
             }
             // ------------------------------------------------------------
             item {
-                SectionCard("OPENCODE ENGINE") {
+                SectionCard("OpenCode Engine") {
                     // Toast sekali saat selesai edit (pola sama dengan field Endpoint).
                     var openCodeUrlEdited by remember { mutableStateOf(false) }
                     OutlinedTextField(
@@ -283,7 +318,7 @@ fun SettingsScreen(
             }
             // ------------------------------------------------------------
             item {
-                SectionCard("AGENT") {
+                SectionCard("Agent") {
                     LabeledSlider(
                         label = "Max agent iterations",
                         display = settings.maxAgentIterations.toString(),
@@ -294,18 +329,26 @@ fun SettingsScreen(
                             vm.update { it.copy(maxAgentIterations = v.roundToInt()) }
                         }
                     )
-                    Text("Permission mode", style = MaterialTheme.typography.bodyLarge)
+                    Text("Permission mode", style = MaterialTheme.typography.titleMedium)
                     PermissionModeOptions(selected = settings.permissionMode) { mode ->
                         vm.update { it.copy(permissionMode = mode) }
                         Toast.makeText(context, "Pengaturan disimpan", Toast.LENGTH_SHORT).show()
                     }
-                    if (settings.permissionMode == PermissionMode.FULL_ACCESS) {
+                    // Peringatan Full Access muncul/hilang dengan motion M3
+                    // (fade + expand vertikal, token AppMotion).
+                    AnimatedVisibility(
+                        visible = settings.permissionMode == PermissionMode.FULL_ACCESS,
+                        enter = fadeIn(AppMotion.standardTween()) +
+                            expandVertically(AppMotion.standardTween()),
+                        exit = fadeOut(AppMotion.standardTween()) +
+                            shrinkVertically(AppMotion.standardTween())
+                    ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
-                                Icons.Filled.Warning,
+                                Icons.Rounded.WarningAmber,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(16.dp)
@@ -322,7 +365,7 @@ fun SettingsScreen(
             }
             // ------------------------------------------------------------
             item {
-                SectionCard("TERMINAL") {
+                SectionCard("Terminal") {
                     LabeledSlider(
                         label = "Terminal font size",
                         display = settings.terminalFontSize.toString(),
@@ -346,7 +389,7 @@ fun SettingsScreen(
             }
             // ------------------------------------------------------------
             item {
-                SectionCard("APPEARANCE") {
+                SectionCard("Appearance") {
                     ThemeModeRow(settings.themeMode) { mode ->
                         vm.update { it.copy(themeMode = mode) }
                         Toast.makeText(context, "Pengaturan disimpan", Toast.LENGTH_SHORT).show()
@@ -369,7 +412,7 @@ fun SettingsScreen(
             }
             // ------------------------------------------------------------
             item {
-                SectionCard("RUNTIME") {
+                SectionCard("Status Runtime") {
                     if (runtimeRows.isEmpty()) {
                         Text(
                             "Checking runtime…",
@@ -377,7 +420,11 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
-                        runtimeRows.forEach { (name, ok, detail) ->
+                        runtimeRows.forEachIndexed { index, (name, ok, detail) ->
+                            // Pemisah baris status memakai warna outlineVariant M3.
+                            if (index > 0) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                            }
                             RuntimeRow(name, ok, detail)
                         }
                     }
@@ -406,7 +453,7 @@ fun SettingsScreen(
                             vm.runtimeStatus { runtimeRows = it }
                         }) {
                             Icon(
-                                Icons.Filled.Refresh,
+                                Icons.Rounded.Refresh,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp)
                             )
@@ -436,24 +483,88 @@ fun SettingsScreen(
 // Building blocks
 // ----------------------------------------------------------------------
 
-/** Kartu satu section dengan header label kecil berwarna primary (uppercase). */
+/**
+ * Kartu satu seksi M3: judul headlineSmall + OutlinedCard (shape large)
+ * berisi baris-baris setting. Konten mengembang mulus via animateContentSize
+ * dengan token motion [AppMotion].
+ */
 @Composable
 private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            title.uppercase(),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
         )
-        ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        OutlinedCard(
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .animateContentSize(AppMotion.standardTween()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 content = content
             )
         }
     }
+}
+
+/** Lingkaran tonal (surfaceContainerHigh) pembungkus ikon leading baris setting. */
+@Composable
+private fun TonalIcon(icon: ImageVector) {
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+/**
+ * Baris navigasi setting M3: leading ikon dalam lingkaran tonal, judul
+ * titleMedium, deskripsi bodyMedium, trailing ikon aksi.
+ */
+@Composable
+private fun NavRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
+    ListItem(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable(onClick = onClick),
+        leadingContent = { TonalIcon(icon) },
+        headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
+        supportingContent = {
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        },
+        trailingContent = {
+            Icon(
+                Icons.Rounded.OpenInNew,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    )
 }
 
 /**
@@ -496,55 +607,68 @@ private fun ProviderChips(selected: ProviderId, onSelect: (ProviderId) -> Unit) 
             FilterChip(
                 selected = selected == provider,
                 onClick = { onSelect(provider) },
-                label = { Text(label) }
+                label = { Text(label) },
+                // Chip terpilih menampilkan tanda centang M3.
+                leadingIcon = if (selected == provider) {
+                    {
+                        Icon(
+                            Icons.Rounded.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                } else {
+                    null
+                }
             )
         }
     }
 }
 
+/** Pemilih mode tema M3: tiga SegmentedButton dalam satu baris. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ThemeModeRow(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        listOf(
-            ThemeMode.SYSTEM to "System",
-            ThemeMode.LIGHT to "Light",
-            ThemeMode.DARK to "Dark"
-        ).forEach { (mode, label) ->
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable { onSelect(mode) }
-            ) {
-                RadioButton(
-                    selected = selected == mode,
-                    onClick = { onSelect(mode) }
-                )
-                Text(label, style = MaterialTheme.typography.bodyMedium)
-            }
+    val options = listOf(
+        ThemeMode.SYSTEM to "System",
+        ThemeMode.LIGHT to "Light",
+        ThemeMode.DARK to "Dark"
+    )
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, (mode, label) ->
+            SegmentedButton(
+                selected = selected == mode,
+                onClick = { onSelect(mode) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                label = { Text(label, style = MaterialTheme.typography.labelLarge) }
+            )
         }
     }
 }
 
+/** Pemilih kepadatan chat M3: label titleMedium + SegmentedButton 2 opsi. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ChatDensityRow(selected: ChatDensity, onSelect: (ChatDensity) -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    val options = listOf(
+        ChatDensity.COMPACT to "Compact",
+        ChatDensity.COMFORTABLE to "Comfortable"
+    )
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("Density", style = MaterialTheme.typography.bodyLarge)
-        FilterChip(
-            selected = selected == ChatDensity.COMPACT,
-            onClick = { onSelect(ChatDensity.COMPACT) },
-            label = { Text("Compact") }
-        )
-        FilterChip(
-            selected = selected == ChatDensity.COMFORTABLE,
-            onClick = { onSelect(ChatDensity.COMFORTABLE) },
-            label = { Text("Comfortable") }
-        )
+        Text("Density", style = MaterialTheme.typography.titleMedium)
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            options.forEachIndexed { index, (density, label) ->
+                SegmentedButton(
+                    selected = selected == density,
+                    onClick = { onSelect(density) },
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                    label = { Text(label, style = MaterialTheme.typography.labelLarge) }
+                )
+            }
+        }
     }
 }
 
@@ -564,6 +688,7 @@ private fun PermissionModeOptions(selected: PermissionMode, onSelect: (Permissio
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
                     .clickable { onSelect(mode) }
             ) {
                 RadioButton(
@@ -571,7 +696,7 @@ private fun PermissionModeOptions(selected: PermissionMode, onSelect: (Permissio
                     onClick = { onSelect(mode) }
                 )
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                    Text(label, style = MaterialTheme.typography.titleMedium)
                     Text(
                         description,
                         style = MaterialTheme.typography.bodySmall,
@@ -583,6 +708,10 @@ private fun PermissionModeOptions(selected: PermissionMode, onSelect: (Permissio
     }
 }
 
+/**
+ * Baris setting dengan Switch M3 (ListItem): judul titleMedium, deskripsi
+ * bodyMedium, trailing Switch. Menyentuh baris juga mengubah nilai.
+ */
 @Composable
 private fun SwitchRow(
     title: String,
@@ -590,21 +719,30 @@ private fun SwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            if (subtitle != null) {
+    ListItem(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .clickable { onCheckedChange(!checked) },
+        headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
+        supportingContent = if (subtitle != null) {
+            {
                 Text(
                     subtitle,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+        } else {
+            null
+        },
+        trailingContent = {
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
+    )
 }
 
+/** Slider berlabel M3: judul titleMedium + nilai dalam pil tonal. */
 @Composable
 private fun LabeledSlider(
     label: String,
@@ -617,14 +755,22 @@ private fun LabeledSlider(
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(label, style = MaterialTheme.typography.bodyLarge)
-            Text(
-                display,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary
-            )
+            Text(label, style = MaterialTheme.typography.titleMedium)
+            // Nilai tampil dalam pil tonal (surfaceContainerHigh) ala M3.
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                Text(
+                    display,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
         }
         Slider(
             value = value,
@@ -635,34 +781,59 @@ private fun LabeledSlider(
     }
 }
 
+/** Hasil tes koneksi: OK (primary, CheckCircle) / Failed (error, WarningAmber). */
 @Composable
 private fun TestResultText(result: Boolean?) {
     when (result) {
         null -> Unit
-        true -> Text(
-            "OK",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.primary
-        )
-        false -> Text(
-            "Failed",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error
-        )
+        true -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                "OK",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        false -> Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                Icons.Rounded.WarningAmber,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                "Failed",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.error
+            )
+        }
     }
 }
 
+/** Satu baris status runtime: StatusDot + nama + detail. */
 @Composable
 private fun RuntimeRow(name: String, ok: Boolean, detail: String) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth()
     ) {
         StatusDot(
             color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
         )
         Column {
-            Text(name, style = MaterialTheme.typography.bodyMedium)
+            Text(name, style = MaterialTheme.typography.titleSmall)
             Text(
                 detail,
                 style = MaterialTheme.typography.bodySmall,

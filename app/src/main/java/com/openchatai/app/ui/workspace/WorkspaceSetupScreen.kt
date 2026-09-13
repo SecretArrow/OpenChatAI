@@ -3,7 +3,7 @@ package com.openchatai.app.ui.workspace
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,27 +11,33 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Place
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -45,10 +51,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.openchatai.app.ui.projects.ProjectsViewModel
+import com.openchatai.app.ui.theme.AppMotion
 import com.openchai.core.model.Project
 
 /**
@@ -60,7 +68,11 @@ import com.openchai.core.model.Project
  *  - Daftar workspace yang sudah ada: tap = aktifkan + masuk Chat.
  *  - Hapus via menu MoreVert; untuk SAF hanya LINK yang dilepas (folder user
  *    TIDAK dihapus).
+ *
+ * Visual Material 3: Scaffold + CenterAlignedTopAppBar, kartu ElevatedCard
+ * dengan ikon tonal, motion AppMotion pada perubahan ukuran kartu.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun WorkspaceSetupScreen(
     onWorkspaceReady: () -> Unit,
@@ -94,17 +106,23 @@ fun WorkspaceSetupScreen(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Text(
-                "Set up workspace",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp)
+    Scaffold(
+        modifier = modifier,
+        // Inset sudah ditangani Scaffold luar (NavGraph) — cegah padding ganda.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            // App bar M3 terpusat untuk judul layar setup.
+            CenterAlignedTopAppBar(
+                title = { Text("Set up workspace") }
             )
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
             Text(
                 "The agent reads and writes files inside one workspace. " +
                     "Pick a folder on your device or create a private one.",
@@ -117,19 +135,20 @@ fun WorkspaceSetupScreen(
             // Opsi 1: folder device (SAF)
             // ----------------------------------------------------------
             ElevatedCard(
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .animateContentSize(AppMotion.standardTween())
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.Place,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.width(8.dp))
+                        TonalIcon(Icons.Rounded.Folder)
+                        Spacer(Modifier.width(12.dp))
                         Text(
                             "Pick a device folder",
                             style = MaterialTheme.typography.titleMedium,
@@ -140,11 +159,15 @@ fun WorkspaceSetupScreen(
                     Text(
                         "Work on a real folder on your device. A new subfolder workspace " +
                             "is created inside it, so the rest of your files stay untouched.",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(8.dp))
-                    FilledTonalButton(onClick = { treeLauncher.launch(null) }) {
+                    Spacer(Modifier.height(12.dp))
+                    // Tombol utama opsi pertama: Button (primary) full-width.
+                    Button(
+                        onClick = { treeLauncher.launch(null) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Text("Choose folder")
                     }
                 }
@@ -156,19 +179,20 @@ fun WorkspaceSetupScreen(
             // Opsi 2: workspace app-private
             // ----------------------------------------------------------
             ElevatedCard(
-                shape = RoundedCornerShape(16.dp),
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                        .animateContentSize(AppMotion.standardTween())
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            Icons.Filled.Add,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(Modifier.width(8.dp))
+                        TonalIcon(Icons.Rounded.Add)
+                        Spacer(Modifier.width(12.dp))
                         Text(
                             "App-private workspace",
                             style = MaterialTheme.typography.titleMedium,
@@ -179,11 +203,15 @@ fun WorkspaceSetupScreen(
                     Text(
                         "A private folder inside the app's storage. No permissions needed; " +
                             "it is removed when the app is uninstalled.",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(Modifier.height(8.dp))
-                    FilledTonalButton(onClick = { showAppDialog = true }) {
+                    Spacer(Modifier.height(12.dp))
+                    // Opsi kedua: aksi sekunder — FilledTonalButton full-width.
+                    FilledTonalButton(
+                        onClick = { showAppDialog = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Text("Create workspace")
                     }
                 }
@@ -228,11 +256,6 @@ fun WorkspaceSetupScreen(
                 }
             }
         }
-
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
     }
 
     // Dialog nama setelah folder SAF dipilih (default: nama folder terakhir).
@@ -306,10 +329,11 @@ private fun WorkspaceRow(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     ElevatedCard(
-        shape = RoundedCornerShape(16.dp),
+        shape = MaterialTheme.shapes.medium,
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onOpen)
+            .animateContentSize(AppMotion.standardTween())
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -329,12 +353,25 @@ private fun WorkspaceRow(
                 )
             }
             if (isActive) {
-                Text("●", color = MaterialTheme.colorScheme.primary)
+                // Status aktif: ikon CheckCircle pada wadah secondaryContainer (M3).
+                Surface(
+                    shape = MaterialTheme.shapes.extraLarge,
+                    color = MaterialTheme.colorScheme.secondaryContainer
+                ) {
+                    Icon(
+                        Icons.Rounded.CheckCircle,
+                        contentDescription = "Workspace aktif",
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier
+                            .padding(2.dp)
+                            .size(16.dp)
+                    )
+                }
                 Spacer(Modifier.width(4.dp))
             }
             Box {
                 IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "More actions")
+                    Icon(Icons.Rounded.MoreVert, contentDescription = "More actions")
                 }
                 DropdownMenu(
                     expanded = menuOpen,
@@ -360,17 +397,50 @@ private fun WorkspaceRow(
     }
 }
 
-/** Badge jenis workspace: "SAF" (folder user) atau "App" (app-dir). */
+/**
+ * Ikon dalam wadah tonal (surfaceContainerHigh, bentuk membulat) — pola
+ * ikon kartu M3 agar setiap opsi punya anchor visual yang jelas.
+ */
+@Composable
+private fun TonalIcon(icon: ImageVector, modifier: Modifier = Modifier) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .padding(8.dp)
+                .size(20.dp)
+        )
+    }
+}
+
+/**
+ * Badge jenis workspace: "SAF" (folder user → primaryContainer) atau
+ * "App" (app-dir → secondaryContainer). Pill memakai shapes.extraLarge.
+ */
 @Composable
 private fun WorkspaceBadge(isSaf: Boolean) {
     Surface(
-        shape = RoundedCornerShape(50),
-        color = MaterialTheme.colorScheme.secondaryContainer
+        shape = MaterialTheme.shapes.extraLarge,
+        color = if (isSaf) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.secondaryContainer
+        }
     ) {
         Text(
             if (isSaf) "SAF" else "App",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            color = if (isSaf) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            },
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
         )
     }
@@ -389,7 +459,7 @@ private fun deriveFolderName(uri: Uri): String = try {
     "workspace"
 }
 
-/** Dialog nama generik untuk pembuatan workspace. */
+/** Dialog nama generik untuk pembuatan workspace (AlertDialog + TextField M3). */
 @Composable
 private fun NameDialog(
     title: String,

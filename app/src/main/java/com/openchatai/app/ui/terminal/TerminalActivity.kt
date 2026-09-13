@@ -8,7 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -30,8 +30,9 @@ import com.openchatai.app.ui.theme.OpenChatTheme
  * ChatScreen) — menggantikan panel terminal embedded di chat agar area chat
  * tidak berkurang.
  *
- * - Tema mengikuti setelan aplikasi (themeMode dari container).
+ * - Tema mengikuti setelan aplikasi (themeMode dari container) via OpenChatTheme.
  * - Judul top bar: "Terminal · <workspace aktif>" (fallback "no workspace").
+ * - TopAppBar M3 dengan tombol kembali (Icons.Rounded.ArrowBack).
  * - Konten: [TerminalContent] dengan [TerminalViewModel] milik activity ini.
  * - Sesi shell pertama dibuat otomatis bila belum ada (LaunchedEffect);
  *   [TerminalContent] punya guard serupa, jadi tepat SATU sesi yang terbentuk.
@@ -61,6 +62,7 @@ class TerminalActivity : ComponentActivity() {
 
                     Scaffold(
                         topBar = {
+                            // TopAppBar M3: judul + tombol kembali ArrowBack (Rounded).
                             TopAppBar(
                                 title = {
                                     Text(
@@ -72,8 +74,8 @@ class TerminalActivity : ComponentActivity() {
                                 navigationIcon = {
                                     IconButton(onClick = { finish() }) {
                                         Icon(
-                                            Icons.Filled.ArrowBack,
-                                            contentDescription = "Back"
+                                            Icons.Rounded.ArrowBack,
+                                            contentDescription = "Kembali"
                                         )
                                     }
                                 }

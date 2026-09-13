@@ -1,20 +1,30 @@
 package com.openchatai.app.ui.settings
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -32,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.openchatai.app.ui.theme.AppMotion
 import com.openchai.core.skills.Skill
 import com.openchai.core.skills.SkillLoaderProvider
 import kotlinx.coroutines.Dispatchers
@@ -42,16 +53,23 @@ import kotlinx.coroutines.withContext
  * Section Settings: daftar Skills & Plugins (plugin ringan berupa pak instruksi).
  *
  * Standalone — di-embed ke SettingsScreen sebagai satu item LazyColumn:
- * `item { SkillsSection() }`. Gaya visual mengikuti SectionCard di SettingsScreen
- * (label kecil uppercase + ElevatedCard sudut 16dp, padding 16dp, jarak 12dp).
+ * `item { SkillsSection() }`.
  *
- * Interaksi:
+ * Overhaul Material 3 (visual-only — kontrak & logika tidak berubah):
+ * - Kartu ringkasan OutlinedCard: deskripsi, statistik, LinearProgressIndicator
+ *   fraksi skill aktif (turunan visual dari state), dan tombol Add.
+ * - Satu OutlinedCard per skill; trigger skill ditampilkan sebagai chip
+ *   kategori (AssistChip dalam FlowRow).
+ * - Progress & animasi memakai token motion [AppMotion].
+ *
+ * Interaksi (tidak berubah):
  * - Switch  : skill bawaan → override tersimpan di prefs.json; skill user → field
  *             enabled di user_skills.json (keduanya lewat SkillLoader.setEnabled).
  * - Edit    : hanya untuk skill user (skill bawaan read-only).
  * - Delete  : hanya untuk skill user, dengan dialog konfirmasi.
  * - Add     : dialog form dengan validasi (instructions minimal 20 karakter).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SkillsSection(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -69,13 +87,18 @@ fun SkillsSection(modifier: Modifier = Modifier) {
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
+        // Judul seksi — konsisten dengan SectionCard di SettingsScreen.
         Text(
-            "SKILLS & PLUGINS",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            "Skills & Plugins",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
         )
-        ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        // Kartu ringkasan M3: deskripsi + statistik/progress + aksi tambah.
+        OutlinedCard(
+            shape = MaterialTheme.shapes.large,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -83,28 +106,64 @@ fun SkillsSection(modifier: Modifier = Modifier) {
                 Text(
                     "Skill aktif otomatis disuntikkan ke prompt agent sesuai tugas. " +
                         "Active skills are injected into the agent prompt when relevant.",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "${skills.size} skill",
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier.weight(1f)
                     )
-                    TextButton(onClick = { adding = true }) { Text("+ Add skill") }
+                    FilledTonalButton(onClick = { adding = true }) {
+                        Icon(
+                            Icons.Rounded.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Add skill")
+                    }
                 }
                 if (skills.isEmpty()) {
                     Text(
                         "Belum ada skill. Tambahkan skill pertamamu.",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    skills.forEachIndexed { index, skill ->
-                        if (index > 0) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                        }
+                    // Progress aktivasi M3 — fraksi skill aktif. Ini murni turunan
+                    // visual dari state skills; tidak menyentuh logika apa pun.
+                    val enabledCount = skills.count { it.enabled }
+                    val fraction = enabledCount.toFloat() / skills.size
+                    val animatedFraction by animateFloatAsState(
+                        targetValue = fraction,
+                        animationSpec = AppMotion.standardTween(),
+                        label = "SkillActivationProgress"
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            "${enabledCount}/${skills.size} aktif",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        LinearProgressIndicator(
+                            progress = { animatedFraction },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        // Satu OutlinedCard per skill (pola kartu M3).
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            skills.forEach { skill ->
+                OutlinedCard(
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                         SkillRow(
                             skill = skill,
                             onToggle = { checked ->
@@ -154,17 +213,24 @@ fun SkillsSection(modifier: Modifier = Modifier) {
     pendingDelete?.let { target ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
+            shape = MaterialTheme.shapes.extraLarge,
             title = { Text("Delete skill") },
             text = { Text("Hapus skill \"${target.name}\"? Tindakan ini tidak dapat dibatalkan.") },
             confirmButton = {
-                TextButton(onClick = {
-                    val id = target.id
-                    pendingDelete = null
-                    scope.launch {
-                        loader.remove(id)
-                        skills = loader.all()
+                TextButton(
+                    // Aksi destruktif diberi warna error ala M3.
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    onClick = {
+                        val id = target.id
+                        pendingDelete = null
+                        scope.launch {
+                            loader.remove(id)
+                            skills = loader.all()
+                        }
                     }
-                }) { Text("Delete") }
+                ) { Text("Delete") }
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
@@ -177,6 +243,7 @@ fun SkillsSection(modifier: Modifier = Modifier) {
 // Baris skill
 // ----------------------------------------------------------------------
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SkillRow(
     skill: Skill,
@@ -185,54 +252,75 @@ private fun SkillRow(
     onDelete: () -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text(skill.name, style = MaterialTheme.typography.bodyLarge)
+                Text(skill.name, style = MaterialTheme.typography.titleMedium)
                 if (skill.builtin) BuiltinBadge()
             }
             Text(
                 skill.description,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
+            // Chip kategori = trigger skill (AssistChip dalam FlowRow M3).
             if (skill.triggers.isNotEmpty()) {
-                Text(
-                    "Triggers: " + skill.triggers.joinToString(", "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    skill.triggers.forEach { trigger ->
+                        AssistChip(
+                            onClick = { /* chip kategori — penanda saja, tanpa aksi */ },
+                            label = {
+                                Text(
+                                    trigger,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        )
+                    }
+                }
             }
         }
         Switch(checked = skill.enabled, onCheckedChange = onToggle)
         if (!skill.builtin) {
             IconButton(onClick = onEdit) {
-                Icon(Icons.Filled.Edit, contentDescription = "Edit ${skill.name}")
+                Icon(
+                    Icons.Rounded.Edit,
+                    contentDescription = "Edit ${skill.name}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             IconButton(onClick = onDelete) {
-                Icon(Icons.Filled.Delete, contentDescription = "Delete ${skill.name}")
+                Icon(
+                    Icons.Rounded.Delete,
+                    contentDescription = "Delete ${skill.name}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
 }
 
+/** Badge kecil "Built-in" — pil tonal secondaryContainer (shape small M3). */
 @Composable
 private fun BuiltinBadge() {
     Surface(
-        shape = RoundedCornerShape(6.dp),
+        shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.secondaryContainer
     ) {
         Text(
             "Built-in",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSecondaryContainer,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
         )
     }
 }
@@ -261,6 +349,7 @@ private fun SkillEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = MaterialTheme.shapes.extraLarge,
         title = { Text(if (initial == null) "Add skill" else "Edit skill") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

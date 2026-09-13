@@ -2,11 +2,16 @@ package com.openchatai.app.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SmartToy
+import androidx.compose.material.icons.rounded.ChatBubble
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalNavigationDrawer
@@ -103,35 +108,87 @@ fun AppNavGraph(container: AppContainer) {
     ) {
         Scaffold(
             bottomBar = {
+                // NavigationBar M3 dengan pola ikon standar: tab TERPILIH pakai
+                // varian Rounded (filled), tab TIDAK terpilih pakai varian Outlined.
                 NavigationBar {
+                    val chatSelected = currentRoute == Routes.CHAT
                     NavigationBarItem(
-                        selected = currentRoute == Routes.CHAT,
+                        selected = chatSelected,
                         onClick = { navigateTo(navController, Routes.CHAT) },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = "Chat") },
+                        icon = {
+                            Icon(
+                                imageVector = if (chatSelected) {
+                                    Icons.Rounded.ChatBubble
+                                } else {
+                                    Icons.Outlined.ChatBubbleOutline
+                                },
+                                contentDescription = "Chat"
+                            )
+                        },
                         label = { Text("Chat") }
                     )
+                    val historySelected = currentRoute == Routes.HISTORY
                     NavigationBarItem(
-                        selected = currentRoute == Routes.HISTORY,
+                        selected = historySelected,
                         onClick = { navigateTo(navController, Routes.HISTORY) },
-                        icon = { Icon(Icons.Filled.DateRange, contentDescription = "History") },
+                        icon = {
+                            Icon(
+                                imageVector = if (historySelected) {
+                                    Icons.Rounded.History
+                                } else {
+                                    Icons.Outlined.History
+                                },
+                                contentDescription = "History"
+                            )
+                        },
                         label = { Text("History") }
                     )
+                    val projectsSelected = currentRoute == Routes.PROJECTS
                     NavigationBarItem(
-                        selected = currentRoute == Routes.PROJECTS,
+                        selected = projectsSelected,
                         onClick = { navigateTo(navController, Routes.PROJECTS) },
-                        icon = { Icon(Icons.Filled.Build, contentDescription = "Projects") },
+                        icon = {
+                            Icon(
+                                imageVector = if (projectsSelected) {
+                                    Icons.Rounded.Folder
+                                } else {
+                                    Icons.Outlined.FolderOpen
+                                },
+                                contentDescription = "Projects"
+                            )
+                        },
                         label = { Text("Projects") }
                     )
+                    val modelsSelected = currentRoute == Routes.MODELS
                     NavigationBarItem(
-                        selected = currentRoute == Routes.MODELS,
+                        selected = modelsSelected,
                         onClick = { navigateTo(navController, Routes.MODELS) },
-                        icon = { Icon(Icons.Filled.List, contentDescription = "Models") },
+                        icon = {
+                            Icon(
+                                imageVector = if (modelsSelected) {
+                                    Icons.Rounded.SmartToy
+                                } else {
+                                    Icons.Outlined.SmartToy
+                                },
+                                contentDescription = "Models"
+                            )
+                        },
                         label = { Text("Models") }
                     )
+                    val settingsSelected = currentRoute == Routes.SETTINGS
                     NavigationBarItem(
-                        selected = currentRoute == Routes.SETTINGS,
+                        selected = settingsSelected,
                         onClick = { navigateTo(navController, Routes.SETTINGS) },
-                        icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
+                        icon = {
+                            Icon(
+                                imageVector = if (settingsSelected) {
+                                    Icons.Rounded.Settings
+                                } else {
+                                    Icons.Outlined.Settings
+                                },
+                                contentDescription = "Settings"
+                            )
+                        },
                         label = { Text("Settings") }
                     )
                 }

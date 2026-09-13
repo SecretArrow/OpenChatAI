@@ -8,22 +8,25 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -32,8 +35,14 @@ import java.io.ByteArrayOutputStream
 private const val MAX_ATTACHMENT_BYTES = 50 * 1024
 
 /**
- * Input bar chat modern: attach file (MIME teks), field multi-line, dan tombol Send/Stop.
- * Saat isGenerating tombol kanan berubah menjadi Close (Stop).
+ * Input bar chat gaya Material Design 3: pil membulat penuh di atas
+ * surfaceContainer (bentuk shapes.extraLarge = 28dp sesuai skala M3).
+ *  - Attach file → OutlinedIconButton (aksi sekunder, pola M3).
+ *  - Field pesan → TextField dengan container & garis indikator transparan agar
+ *    menyatu dengan pil Surface di belakangnya (Color.Transparent bukan warna
+ *    tema — hanya untuk "meniadakan" dekorasi internal TextField).
+ *  - Kirim → FilledIconButton (primary), nonaktif saat teks kosong.
+ *  - Stop → FilledTonalIconButton (secondaryContainer) saat isGenerating.
  */
 @Composable
 fun ChatInputBar(
@@ -60,8 +69,8 @@ fun ChatInputBar(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        shape = MaterialTheme.shapes.extraLarge,
+        color = MaterialTheme.colorScheme.surfaceContainer
     ) {
         Row(
             modifier = Modifier
@@ -69,28 +78,48 @@ fun ChatInputBar(
                 .padding(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = { pickFile.launch("text/*") }) {
-                Icon(Icons.Filled.Add, contentDescription = "Attach file")
+            // Lampirkan file teks — ikon aksi sekunder bergaya outlined.
+            OutlinedIconButton(onClick = { pickFile.launch("text/*") }) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = "Attach file",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            OutlinedTextField(
+            // Field pesan multi-line; IME Send memicu onSend bila teks valid.
+            TextField(
                 value = text,
                 onValueChange = onTextChange,
                 modifier = Modifier.weight(1f),
                 placeholder = { Text("Ask Open Chat AI…") },
                 maxLines = 5,
-                shape = RoundedCornerShape(24.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
+                ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(
                     onSend = { if (text.isNotBlank() && !isGenerating) onSend() }
                 )
             )
             if (isGenerating) {
-                IconButton(onClick = onStop) {
-                    Icon(Icons.Filled.Close, contentDescription = "Stop generating")
+                // Sedang generating → tombol berubah menjadi Stop (tonal).
+                FilledTonalIconButton(onClick = onStop) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Stop generating"
+                    )
                 }
             } else {
-                IconButton(onClick = onSend, enabled = text.isNotBlank()) {
-                    Icon(Icons.Filled.Send, contentDescription = "Send")
+                // Kirim — FilledIconButton primary; nonaktif saat teks kosong.
+                FilledIconButton(onClick = onSend, enabled = text.isNotBlank()) {
+                    Icon(
+                        imageVector = Icons.Rounded.Send,
+                        contentDescription = "Send"
+                    )
                 }
             }
         }

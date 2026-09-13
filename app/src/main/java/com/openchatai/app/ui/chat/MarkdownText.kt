@@ -56,7 +56,10 @@ fun MarkdownText(content: String, fontScale: Float = 1f, modifier: Modifier = Mo
 @Composable
 private fun MarkdownParagraph(text: String, fontScale: Float) {
     val context = LocalContext.current
+    // Warna & ukuran mengikuti token M3: onSurface + fontSize bodyLarge (16sp)
+    // dikali skala font chat dari settings.
     val textColor = MaterialTheme.colorScheme.onSurface
+    val bodyFontSize = MaterialTheme.typography.bodyLarge.fontSize.value * fontScale
     val markwon = remember(context) { Markwon.create(context) }
     AndroidView(
         modifier = Modifier.fillMaxWidth(),
@@ -65,13 +68,13 @@ private fun MarkdownParagraph(text: String, fontScale: Float) {
                 movementMethod = LinkMovementMethod.getInstance()
                 highlightColor = android.graphics.Color.TRANSPARENT
                 setTextColor(textColor.toArgb())
-                textSize = 16f * fontScale
+                textSize = bodyFontSize
                 setLineSpacing(0f, 1.2f)
             }
         },
         update = { view ->
             view.setTextColor(textColor.toArgb())
-            view.textSize = 16f * fontScale
+            view.textSize = bodyFontSize
             markwon.setMarkdown(view, text)
         }
     )

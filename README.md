@@ -6,9 +6,19 @@
 
 ![CI](https://github.com/SecretArrow/OpenChatAI/actions/workflows/android-ci.yml/badge.svg)
 
-**Versi terbaru:** v1.9.1 (versionCode 12) · paket `com.openchatai.app` · minSdk 26 · ABI `arm64-v8a` + `x86_64`
+**Versi terbaru:** v1.10.0 (versionCode 13) · paket `com.openchatai.app` · minSdk 26 · ABI `arm64-v8a` + `x86_64`
 
 ## Fitur
+
+### Antarmuka Material Design 3 (v1.10.0)
+Seluruh UI dirombak mengikuti spesifikasi [Material Design 3](https://m3.material.io/) — bukan sekadar tema, tapi sistem desain penuh:
+- **Skema warna M3 lengkap** (35+ color role): primary/secondary/tertiary + container-nya, surfaceContainer (lowest→highest), outline/outlineVariant, inverse, error — versi terang & gelap diturunkan dari palet tonal brand ungu
+- **Dynamic color (Material You)**: di Android 12+ UI otomatis mengambil warna wallpaper perangkat, tetap mengikuti mode terang/gelap pilihan user; di bawah Android 12 fallback ke skema brand
+- **Material Symbols**: semua ikon kini set extended Rounded/Outlined — tab bottom-nav memakai pola M3 *outlined saat tidak aktif, filled saat aktif*
+- **Komponen M3**: TopAppBar, NavigationBar, ModalNavigationDrawer + ModalDrawerSheet, ListItem, Card/ElevatedCard/OutlinedCard, FilledTonalButton/OutlinedButton, FilledIconButton, ModalBottomSheet, SingleChoiceSegmentedButtonRow, FilterChip/AssistChip, indikator progres M3, AlertDialog
+- **Shape scale & tipografi M3**: shape 8/12/16/20/28 dp + 15 gaya tipografi (display → label) untuk hierarki yang konsisten
+- **Motion M3**: token durasi & kurva easing *emphasized/standard* untuk semua animasi (expand kartu, muncul-hilang elemen, indikator)
+- Detail sistem desain: [docs/UI_DESIGN.md](docs/UI_DESIGN.md)
 
 ### Chat (fokus utama)
 - Streaming AI response, Markdown, code blocks + syntax layout, copy response/code
@@ -85,6 +95,7 @@
 | [docs/PROVIDERS.md](docs/PROVIDERS.md) | Semua provider AI, model list dinamis, penyimpanan API key |
 | [docs/AGENT_MCP_SKILLS.md](docs/AGENT_MCP_SKILLS.md) | Agent engine, mode izin, workspace & AGENTS.md, MCP, skills & plugins |
 | [docs/BUILD_CI.md](docs/BUILD_CI.md) | CI/CD GitHub Actions, auto-fix, proses release & signing |
+| [docs/UI_DESIGN.md](docs/UI_DESIGN.md) | Sistem desain Material 3: color role, dynamic color, shape, tipografi, ikon, motion, komponen per layar |
 
 ## Build
 
@@ -160,6 +171,7 @@ Open Chat AI men-embed [llama.cpp](https://github.com/ggml-org/llama.cpp) (pin t
 | v1.8.1 | Katalog model low-RAM (Qwen3.5 0.8B, LFM2 1.2B, Qwen3 0.6B, Qwen2.5 0.5B Q4_K_M), sizeBytes eksak, semua model teruji inferensi |
 | v1.9.0 | **Audit & perbaikan root-cause**: chat langsung muncul setelah create workspace (race lifecycle diperbaiki), command agent & terminal ter-bind ke workspace aktif, Ollama auto-detect + Start + Test model, model selector di header, agent actions satu tombol, auto-scroll + "New messages", **Terminal sebagai Activity terpisah**, agent events collapsible |
 | v1.9.1 | **Fix "chat tidak muncul — terus di setup workspace"**: hapus redirect paksa ke setup saat startup, gate full-screen diganti banner non-blocking (chat & percakapan selalu tampil), workspace app-private dibuat otomatis saat kirim prompt agent tanpa workspace, semua alur pilih-workspace anti-race (await sebelum navigasi), pilihan workspace dari chat chip ikut dipersist |
+| v1.10.0 | **Material Design 3 menyeluruh**: skema warna M3 lengkap + dynamic color (Material You) di Android 12+, Material Symbols Rounded/Outlined (bottom-nav filled/outlined), shape scale & tipografi 15 gaya, token motion M3, semua layar (chat, settings, models, runtime, linux, workspace, history, sessions, projects, terminal) dipindah ke komponen M3 asli |
 
 ## Attribution & Lisensi
 

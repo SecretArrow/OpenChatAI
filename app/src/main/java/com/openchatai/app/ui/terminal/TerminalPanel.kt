@@ -1,5 +1,11 @@
 package com.openchatai.app.ui.terminal
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -24,11 +30,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Clear
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.List
+import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -61,11 +71,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.openchatai.app.R
 import com.openchatai.app.ui.components.StatusDot
+import com.openchatai.app.ui.theme.AppMotion
 import com.openchatai.app.ui.theme.TerminalBackground
 import com.openchatai.app.ui.theme.TerminalForeground
-import com.openchatai.app.ui.theme.TerminalGreen
-import com.openchatai.app.ui.theme.TerminalRed
-import com.openchatai.app.ui.theme.TerminalYellow
 import com.openchai.core.linux.LinuxEnvPhase
 import com.openchai.core.runtime.ManagedProcess
 import com.openchai.core.runtime.ProcState
@@ -78,7 +86,12 @@ private val QUICK_COMMANDS = listOf(
     "ls", "pwd", "git status", "node -v", "python3 --version", "df -h .", "ps | head"
 )
 
-/** Bentuk panel embedded (sudut atas membulat) — hanya dipakai wrapper. */
+/**
+ * Bentuk panel embedded (hanya sudut atas membulat, sesuai posisi panel yang
+ * menempel di dasar layar) — hanya dipakai wrapper. Bentuk asimetris ini
+ * tidak bisa diekspresikan lewat skala MaterialTheme.shapes sehingga
+ * didefinisikan eksplisit di sini.
+ */
 private val PanelShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
 
 /**
@@ -89,6 +102,9 @@ private val PanelShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
  * tidak pecah; [onOpenLinuxSetup] tetap ada di signature demi kompatibilitas
  * call site, tetapi banner status Linux di dalam konten kini informatif
  * (tanpa navigasi) karena konten dipakai juga di Activity tanpa rute setup.
+ *
+ * Buka/tutup panel memakai AnimatedVisibility dengan token motion M3
+ * (AppMotion): masuk dari bawah (expand + fade), keluar ke atas (shrink + fade).
  * Tidak menampilkan apa pun bila [visible] == false.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -99,22 +115,38 @@ fun TerminalPanel(
     onOpenLinuxSetup: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    if (!visible) return
-
-    val vm: TerminalViewModel = viewModel()
-    TerminalContent(
-        vm = vm,
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(AppMotion.standardTween()) + expandVertically(
+            animationSpec = AppMotion.standardTween(),
+            expandFrom = Alignment.Bottom
+        ),
+        exit = fadeOut(AppMotion.standardTween()) + shrinkVertically(
+            animationSpec = AppMotion.standardTween(),
+            shrinkTowards = Alignment.Top
+        ),
         modifier = modifier
-            .fillMaxWidth()
-            .height(300.dp)
-            .shadow(elevation = 8.dp, shape = PanelShape, clip = true),
-        headerSlot = {
-            // Tombol collapse hanya relevan di mode panel embedded.
-            IconButton(onClick = onCollapse) {
-                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Tutup terminal")
+    ) {
+        // ViewModel dibuat di dalam konten (sama seperti perilaku lama: hanya
+        // saat panel tampil).
+        val vm: TerminalViewModel = viewModel()
+        TerminalContent(
+            vm = vm,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(300.dp)
+                .shadow(elevation = 8.dp, shape = PanelShape, clip = true),
+            headerSlot = {
+                // Tombol collapse hanya relevan di mode panel embedded.
+                IconButton(onClick = onCollapse) {
+                    Icon(
+                        Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "Tutup terminal"
+                    )
+                }
             }
-        }
-    )
+        )
+    }
 }
 
 /**
@@ -122,14 +154,17 @@ fun TerminalPanel(
  * (embedded) dan [TerminalActivity] (layar penuh). [vm] disuplai pemanggil
  * agar satu instance [TerminalViewModel] bisa dipakai bersama.
  *
- * Struktur:
- *  - Header: judul + font +/− + Ctrl+C + Clear + [headerSlot] (opsional).
- *  - Bar tab: pill status Linux (informatif) + chip sesi shell + "+ New" +
- *    tab Processes.
+ * Struktur (chrome di luar area emulator memakai peran warna Material 3):
+ *  - Toolbar: Surface surfaceContainer dengan ikon Terminal tonal + judul +
+ *    font +/− + Ctrl+C + Clear + [headerSlot] (opsional).
+ *  - Bar tab: pill status Linux (informatif) + chip sesi shell (FilterChip)
+ *    + "+ New" + tab Processes.
  *  - Banner status lingkungan Linux bila belum terpasang/tak didukung.
  *  - Konten: shell interaktif (quick commands + output + input) atau daftar
  *    proses terkelola (Stop/Restart + stdin REPL).
  *
+ * Area output emulator tetap memakai palet khusus terminal
+ * (TerminalBackground/TerminalForeground) — identitas visual emulator.
  * Modifier [modifier] menentukan ukuran/bentuk akhir (wrapper: 300dp dengan
  * sudut membulat + shadow; activity: fillMaxSize polos).
  */
@@ -179,72 +214,97 @@ fun TerminalContent(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surface
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // Border atas subtle.
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.35f))
-            )
-
-            // Header.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 14.dp, end = 4.dp, top = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                // Perubahan tinggi konten (banner/stdin muncul-hilang)
+                // dianimasikan lembut dengan token motion M3.
+                .animateContentSize(animationSpec = AppMotion.standardTween())
+        ) {
+            // ---------------- Toolbar M3 (surfaceContainer) ----------------
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceContainer
             ) {
-                Text(
-                    text = stringResource(R.string.terminal_tab),
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = { vm.changeFontSize(1) }) {
-                    Text("+", style = MaterialTheme.typography.titleMedium)
-                }
-                IconButton(onClick = { vm.changeFontSize(-1) }) {
-                    Text("-", style = MaterialTheme.typography.titleMedium)
-                }
-                // Ctrl+C: kirim byte SIGINT (ETX) TANPA newline ke sesi aktif.
-                // Catatan: host legacy menambahkan newline otomatis (baris kosong
-                // setelah interrupt — tidak berbahaya); host Linux menulis
-                // byte mentah. Posisi: dekat font size / Clear / slot header.
-                TextButton(
-                    onClick = { selectedSessionId?.let { vm.write(it, "\u0003") } },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Ctrl+C", style = MaterialTheme.typography.labelSmall)
+                    // Ikon tab terminal tonal — identitas toolbar.
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.primaryContainer
+                    ) {
+                        Icon(
+                            Icons.Rounded.Terminal,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier
+                                .padding(6.dp)
+                                .size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.terminal_tab),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(onClick = { vm.changeFontSize(1) }) {
+                        Text("+", style = MaterialTheme.typography.titleMedium)
+                    }
+                    IconButton(onClick = { vm.changeFontSize(-1) }) {
+                        Text("-", style = MaterialTheme.typography.titleMedium)
+                    }
+                    // Ctrl+C: kirim byte SIGINT (ETX) TANPA newline ke sesi aktif.
+                    // Catatan: host legacy menambahkan newline otomatis (baris kosong
+                    // setelah interrupt — tidak berbahaya); host Linux menulis
+                    // byte mentah. Posisi: dekat font size / Clear / slot header.
+                    TextButton(
+                        onClick = { selectedSessionId?.let { vm.write(it, "\u0003") } },
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
+                        Text("Ctrl+C", style = MaterialTheme.typography.labelSmall)
+                    }
+                    IconButton(onClick = { selectedSessionId?.let { vm.clear(it) } }) {
+                        Icon(
+                            Icons.Rounded.Clear,
+                            contentDescription = "Bersihkan output"
+                        )
+                    }
+                    // Slot header tambahan dari pemanggil (wrapper: tombol collapse).
+                    headerSlot?.invoke()
                 }
-                IconButton(onClick = { selectedSessionId?.let { vm.clear(it) } }) {
-                    Icon(Icons.Filled.Clear, contentDescription = "Bersihkan output")
-                }
-                // Slot header tambahan dari pemanggil (wrapper: tombol collapse).
-                headerSlot?.invoke()
             }
 
-            // Tab sesi + aksi (+ pill status Linux di bar kedua — dipilih agar
+            // Tab sesi + aksi (+ pill status Linux di bar ini — dipilih agar
             // tidak overflow pada layar sempit; bar ini sudah scrollable).
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 10.dp, vertical = 2.dp),
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val linuxReady = linuxPhase == LinuxEnvPhase.READY
                 // Pill status Linux: informatif — konten ini juga dipakai
                 // TerminalActivity yang tidak punya rute layar setup.
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    shape = MaterialTheme.shapes.extraSmall,
+                    color = if (linuxReady) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHighest
+                    }
                 ) {
                     Text(
-                        text = if (linuxPhase == LinuxEnvPhase.READY) "Linux: aktif"
-                        else "Linux: shell Android",
+                        text = if (linuxReady) "Linux: aktif" else "Linux: shell Android",
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (linuxPhase == LinuxEnvPhase.READY) {
-                            MaterialTheme.colorScheme.primary
+                        color = if (linuxReady) {
+                            MaterialTheme.colorScheme.onSecondaryContainer
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
@@ -272,7 +332,14 @@ fun TerminalContent(
                         selectedTab = PanelTab.SHELL
                         processOutputId = null
                     },
-                    label = { Text("+ New") }
+                    leadingIcon = {
+                        Icon(
+                            Icons.Rounded.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
+                    label = { Text("New") }
                 )
                 FilterChip(
                     selected = selectedTab == PanelTab.PROCESSES,
@@ -282,27 +349,37 @@ fun TerminalContent(
                             else PanelTab.PROCESSES
                         processOutputId = null
                     },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Rounded.List,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    },
                     label = { Text("Processes (${processes.size})", maxLines = 1) }
                 )
             }
 
             // Banner status lingkungan Linux (di atas konten, hanya bila belum
             // terpasang / perangkat tidak didukung) — informatif, tanpa klik.
+            // Warna banner memakai peran colorScheme M3 (chrome di luar emulator).
             when (linuxPhase) {
                 LinuxEnvPhase.NOT_INSTALLED -> LinuxSetupBanner(
                     text = "Lingkungan Linux belum terpasang — terminal memakai shell " +
                         "Android terbatas. Buka Settings → Lingkungan Linux untuk pasang " +
                         "Ubuntu (apt/node/python).",
-                    container = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    icon = Icons.Filled.Info,
-                    iconTint = MaterialTheme.colorScheme.primary
+                    container = MaterialTheme.colorScheme.secondaryContainer,
+                    icon = Icons.Rounded.Info,
+                    iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    textColor = MaterialTheme.colorScheme.onSecondaryContainer
                 )
                 LinuxEnvPhase.NOT_SUPPORTED -> LinuxSetupBanner(
                     text = "Perangkat tidak mendukung lingkungan Linux: " +
                         vm.linuxCapability.reason,
-                    container = TerminalYellow.copy(alpha = 0.18f),
-                    icon = Icons.Filled.Warning,
-                    iconTint = TerminalYellow
+                    container = MaterialTheme.colorScheme.errorContainer,
+                    icon = Icons.Rounded.WarningAmber,
+                    iconTint = MaterialTheme.colorScheme.onErrorContainer,
+                    textColor = MaterialTheme.colorScheme.onErrorContainer
                 )
                 else -> Unit
             }
@@ -382,7 +459,7 @@ fun TerminalContent(
                                 onClick = { sendInput() },
                                 enabled = true
                             ) {
-                                Icon(Icons.Filled.Send, contentDescription = "Kirim")
+                                Icon(Icons.Rounded.Send, contentDescription = "Kirim")
                             }
                         }
                     }
@@ -427,7 +504,13 @@ fun TerminalContent(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 TextButton(onClick = { processOutputId = null }) {
-                                    Text("← Proses")
+                                    Icon(
+                                        Icons.Rounded.ArrowBack,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Proses")
                                 }
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -460,8 +543,21 @@ fun TerminalContent(
                                     proc.state == ProcState.STARTING ||
                                     proc.state == ProcState.RESTARTING
                                 )
-                            if (procActive) {
-                                var stdinText by remember(showingId) { mutableStateOf("") }
+                            // Baris stdin muncul/hilang dengan transisi M3.
+                            AnimatedVisibility(
+                                visible = procActive,
+                                enter = fadeIn(AppMotion.standardTween()) + expandVertically(
+                                    animationSpec = AppMotion.standardTween(),
+                                    expandFrom = Alignment.Bottom
+                                ),
+                                exit = fadeOut(AppMotion.standardTween()) + shrinkVertically(
+                                    animationSpec = AppMotion.standardTween(),
+                                    shrinkTowards = Alignment.Top
+                                )
+                            ) {
+                                var stdinText by remember(showingId) {
+                                    mutableStateOf("")
+                                }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -474,13 +570,18 @@ fun TerminalContent(
                                         modifier = Modifier.weight(1f),
                                         singleLine = true,
                                         placeholder = {
-                                            Text("stdin (REPL)…", fontFamily = FontFamily.Monospace)
+                                            Text(
+                                                "stdin (REPL)…",
+                                                fontFamily = FontFamily.Monospace
+                                            )
                                         },
                                         textStyle = TextStyle(
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = settings.terminalFontSize.sp
                                         ),
-                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                                        keyboardOptions = KeyboardOptions(
+                                            imeAction = ImeAction.Send
+                                        ),
                                         keyboardActions = KeyboardActions(
                                             onSend = {
                                                 if (stdinText.isNotBlank()) {
@@ -498,7 +599,10 @@ fun TerminalContent(
                                             }
                                         }
                                     ) {
-                                        Icon(Icons.Filled.Send, contentDescription = "Kirim ke stdin")
+                                        Icon(
+                                            Icons.Rounded.Send,
+                                            contentDescription = "Kirim ke stdin"
+                                        )
                                     }
                                 }
                             }
@@ -512,7 +616,8 @@ fun TerminalContent(
 
 /**
  * Banner tipis status lingkungan Linux. [onClick] opsional: bila null (konteks
- * tanpa rute setup, mis. TerminalActivity) banner murni informatif.
+ * tanpa rute setup, mis. TerminalActivity) banner murni informatif. Warna
+ * container/icon/text disuplai pemanggil (peran colorScheme M3).
  */
 @Composable
 private fun LinuxSetupBanner(
@@ -520,6 +625,7 @@ private fun LinuxSetupBanner(
     container: Color,
     icon: ImageVector,
     iconTint: Color,
+    textColor: Color,
     onClick: (() -> Unit)? = null
 ) {
     Surface(
@@ -533,11 +639,11 @@ private fun LinuxSetupBanner(
                     Modifier
                 }
             ),
-        shape = RoundedCornerShape(10.dp),
+        shape = MaterialTheme.shapes.small,
         color = container
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
@@ -550,13 +656,16 @@ private fun LinuxSetupBanner(
             Text(
                 text = text,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = textColor
             )
         }
     }
 }
 
-/** Area output monospace gelap dengan auto-scroll opsional. */
+/**
+ * Area output monospace gelap dengan auto-scroll opsional. Palet khusus
+ * Terminal* (dari theme/Color.kt) dipertahankan HANYA di sini — area emulator.
+ */
 @Composable
 private fun TerminalOutputSurface(
     text: String,
@@ -640,9 +749,15 @@ private fun formatDuration(startedAt: Long, endedAt: Long?): String {
     return "%02d:%02d".format(totalSeconds / 60, totalSeconds % 60)
 }
 
+/**
+ * Warna status dot proses — daftar proses adalah chrome UI, jadi memakai
+ * peran colorScheme M3 (bukan palet terminal): RUNNING = primary,
+ * STARTING/RESTARTING = tertiary, FAILED = error, EXITED/STOPPED = outline.
+ */
+@Composable
 private fun stateColor(state: ProcState): Color = when (state) {
-    ProcState.RUNNING -> TerminalGreen
-    ProcState.RESTARTING, ProcState.STARTING -> TerminalYellow
-    ProcState.FAILED -> TerminalRed
-    else -> Color(0xFF8B949E) // EXITED / STOPPED — abu
+    ProcState.RUNNING -> MaterialTheme.colorScheme.primary
+    ProcState.RESTARTING, ProcState.STARTING -> MaterialTheme.colorScheme.tertiary
+    ProcState.FAILED -> MaterialTheme.colorScheme.error
+    else -> MaterialTheme.colorScheme.outline // EXITED / STOPPED — abu netral
 }

@@ -1,12 +1,12 @@
 package com.openchatai.app.ui.linux
 
-import androidx.compose.foundation.background
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -14,27 +14,34 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.CloudDownload
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Storage
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,10 +50,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.openchatai.app.ui.theme.AppMotion
 import com.openchai.core.linux.DeviceCapability
 import com.openchai.core.linux.LinuxEnvPhase
 import com.openchai.core.linux.LinuxInstallState
@@ -56,11 +65,17 @@ import com.openchai.core.llm.humanBytes
 /**
  * Screen setup lingkungan Linux (proot + rootfs Ubuntu):
  *  - Card PERANGKAT: ABI, RAM total, storage bebas, status didukung/tidak.
- *  - Card STATUS: chip fase + progress unduhan/ekstraksi/bootstrap + refresh.
+ *  - Card STATUS: chip fase + progress unduhan/ekstraksi/bootstrap.
  *  - Card PILIH ROOTFS: pilihan variant per-ABI (Pasang / Jeda / Lanjut / Batal).
  *  - Card MANAJEMEN (bila READY): hapus lingkungan dengan dialog konfirmasi.
  *  - Tombol "Mulai coding →" kembali ke Chat bila lingkungan siap.
+ *
+ * Visual Material 3: Scaffold + TopAppBar (aksi refresh), kartu langkah dengan
+ * ikon tonal (surfaceContainerHigh), progres LinearProgressIndicator dengan
+ * track surfaceContainerHighest, pesan gagal dalam blok errorContainer +
+ * WarningAmber, motion AppMotion pada perubahan isi kartu.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LinuxSetupScreen(
     onDone: () -> Unit,
@@ -92,24 +107,34 @@ fun LinuxSetupScreen(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            // ---------------- Header ----------------
-            Text(
-                text = "Lingkungan Linux",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 2.dp)
+    Scaffold(
+        modifier = modifier,
+        // Inset ditangani Scaffold luar (NavGraph) — cegah padding ganda.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        topBar = {
+            // App bar M3 dengan aksi refresh status instalasi.
+            TopAppBar(
+                title = { Text("Lingkungan Linux") },
+                actions = {
+                    IconButton(onClick = vm::refresh) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Muat ulang status")
+                    }
+                }
             )
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+        ) {
             Text(
                 text = "Debian/Ubuntu userspace via proot — apt, nodejs, npm, python3, git " +
                     "berjalan nyata di dalam sandbox aplikasi. Tanpa root, tanpa VM.",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp)
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
             )
 
             LazyColumn(
@@ -124,8 +149,7 @@ fun LinuxSetupScreen(
                 item {
                     StatusCard(
                         phase = status,
-                        installState = installState,
-                        onRefresh = vm::refresh
+                        installState = installState
                     )
                 }
 
@@ -166,7 +190,7 @@ fun LinuxSetupScreen(
                         verticalAlignment = Alignment.Top
                     ) {
                         Icon(
-                            Icons.Filled.Info,
+                            Icons.Rounded.Info,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(16.dp)
@@ -183,12 +207,6 @@ fun LinuxSetupScreen(
                 }
             }
         }
-
-        // Snackbar error instalasi (di atas bottom area screen).
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
     }
 
     // ---------------- Konfirmasi hapus lingkungan ----------------
@@ -221,6 +239,7 @@ fun LinuxSetupScreen(
     }
 }
 
+/** Judul section kecil berwarna primary (uppercase) — pola label M3. */
 @Composable
 private fun SectionTitle(title: String) {
     Text(
@@ -231,24 +250,50 @@ private fun SectionTitle(title: String) {
     )
 }
 
+/**
+ * Ikon dalam wadah tonal (surfaceContainerHigh, bentuk membulat) — pola kartu
+ * langkah M3: tiap kartu punya anchor visual (Terminal/Cloud/Storage).
+ */
+@Composable
+private fun TonalIcon(icon: ImageVector, modifier: Modifier = Modifier) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .padding(8.dp)
+                .size(20.dp)
+        )
+    }
+}
+
 /** Card PERANGKAT: ABI, RAM, storage bebas + status didukung/tidak (reason). */
 @Composable
 private fun DeviceCard(capability: DeviceCapability) {
-    ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+    ElevatedCard(shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            SectionTitle("PERANGKAT")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TonalIcon(Icons.Rounded.Terminal)
+                Spacer(Modifier.width(12.dp))
+                SectionTitle("PERANGKAT")
+            }
             SpecRow(label = "ABI", value = capability.abi)
             SpecRow(label = "RAM total", value = fmtGb(capability.totalRamMb))
             SpecRow(label = "Storage bebas", value = fmtStorage(capability.availStorageMb))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (capability.supported) {
                     Icon(
-                        Icons.Filled.Check,
+                        Icons.Rounded.Check,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
@@ -261,7 +306,7 @@ private fun DeviceCard(capability: DeviceCapability) {
                     )
                 } else {
                     Icon(
-                        Icons.Filled.Warning,
+                        Icons.Rounded.WarningAmber,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(18.dp)
@@ -295,31 +340,27 @@ private fun SpecRow(label: String, value: String) {
 }
 
 /**
- * Card STATUS: chip fase + detail progres/pesan + tombol refresh.
- * Progress memakai LinearProgressIndicator lambda-form (M3 2024.09.03).
+ * Card STATUS: chip fase + detail progres/pesan.
+ * Progress memakai LinearProgressIndicator lambda-form (M3 2024.09.03) dengan
+ * track surfaceContainerHighest; label progres memakai bodyMedium.
  */
 @Composable
 private fun StatusCard(
     phase: LinuxEnvPhase,
-    installState: LinuxInstallState?,
-    onRefresh: () -> Unit
+    installState: LinuxInstallState?
 ) {
-    ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+    ElevatedCard(shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(16.dp)
+                .animateContentSize(AppMotion.standardTween()),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TonalIcon(Icons.Rounded.Cloud)
+                Spacer(Modifier.width(12.dp))
                 SectionTitle("STATUS")
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Filled.Refresh, contentDescription = "Muat ulang status")
-                }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -327,7 +368,7 @@ private fun StatusCard(
                 Spacer(Modifier.width(10.dp))
                 Text(
                     text = statusDetail(phase, installState),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -342,32 +383,53 @@ private fun StatusCard(
                         .coerceIn(0f, 1f)
                     LinearProgressIndicator(
                         progress = { fraction },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
                     )
                 } else {
+                    // Indeterminate memakai gaya default M3.
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 }
                 Text(
                     text = "${humanBytes(st.progressBytes)} / ${humanBytes(st.totalBytes)}",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 st.message?.takeIf { it.isNotBlank() }?.let {
                     Text(
                         text = it,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            // Pesan error (merah) untuk fase FAILED.
+            // Pesan error untuk fase FAILED — blok errorContainer + WarningAmber.
             if (phase == LinuxEnvPhase.FAILED) {
-                Text(
-                    text = installState?.message ?: "Instalasi gagal — coba lagi dari card PILIH ROOTFS.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(
+                            Icons.Rounded.WarningAmber,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = installState?.message
+                                ?: "Instalasi gagal — coba lagi dari card PILIH ROOTFS.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
             }
         }
     }
@@ -393,7 +455,7 @@ private fun statusDetail(phase: LinuxEnvPhase, installState: LinuxInstallState?)
         LinuxEnvPhase.BOOTSTRAPPING -> "Bootstrap awal (resolv/hosts/workspace)…"
     }
 
-/** Pill status berwarna per fase (tanpa interaksi — murni indikator). */
+/** Pill status berwarna per fase (tanpa interaksi — murni indikator M3). */
 @Composable
 private fun StatusChip(phase: LinuxEnvPhase) {
     val (bg, fg) = when (phase) {
@@ -410,7 +472,7 @@ private fun StatusChip(phase: LinuxEnvPhase) {
         LinuxEnvPhase.NOT_SUPPORTED ->
             MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
     }
-    Surface(shape = RoundedCornerShape(50), color = bg) {
+    Surface(shape = MaterialTheme.shapes.extraLarge, color = bg) {
         Text(
             text = when (phase) {
                 LinuxEnvPhase.READY -> "Siap"
@@ -430,8 +492,8 @@ private fun StatusChip(phase: LinuxEnvPhase) {
 }
 
 /**
- * Card satu variant rootfs: nama + deskripsi + badge python2 + matriks aksi:
- * DOWNLOADING → Jeda + Batal; EXTRACTING/BOOTSTRAPPING → Batal;
+ * Card satu variant rootfs: ikon tonal + nama + ukuran + badge python2 +
+ * matriks aksi: DOWNLOADING → Jeda + Batal; EXTRACTING/BOOTSTRAPPING → Batal;
  * PAUSED → Lanjut + Batal; else → Pasang (nonaktif bila perangkat tak didukung).
  */
 @Composable
@@ -443,17 +505,20 @@ private fun VariantCard(
     onPause: () -> Unit,
     onCancel: () -> Unit
 ) {
-    ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+    ElevatedCard(shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(16.dp)
+                .animateContentSize(AppMotion.standardTween()),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                TonalIcon(Icons.Rounded.CloudDownload)
+                Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = variant.name,
@@ -463,13 +528,13 @@ private fun VariantCard(
                     )
                     Text(
                         text = "${humanBytes(variant.sizeBytes)} · ${variant.abi}",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 if (variant.python2) {
                     Surface(
-                        shape = RoundedCornerShape(50),
+                        shape = MaterialTheme.shapes.extraLarge,
                         color = MaterialTheme.colorScheme.secondaryContainer
                     ) {
                         Text(
@@ -483,7 +548,7 @@ private fun VariantCard(
             }
             Text(
                 text = variant.description,
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Row(
@@ -493,7 +558,7 @@ private fun VariantCard(
             ) {
                 when (phase) {
                     LinuxEnvPhase.DOWNLOADING -> {
-                        Button(onClick = onPause) { Text("Jeda") }
+                        FilledTonalButton(onClick = onPause) { Text("Jeda") }
                         Spacer(Modifier.width(8.dp))
                         TextButton(onClick = onCancel) { Text("Batal") }
                     }
@@ -520,18 +585,22 @@ private fun VariantCard(
 /** Card MANAJEMEN (bila READY): hapus lingkungan Linux (warna error). */
 @Composable
 private fun ManagementCard(onRemove: () -> Unit) {
-    ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+    ElevatedCard(shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            SectionTitle("MANAJEMEN")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TonalIcon(Icons.Rounded.Storage)
+                Spacer(Modifier.width(12.dp))
+                SectionTitle("MANAJEMEN")
+            }
             Text(
                 text = "Menghapus lingkungan membuang rootfs Ubuntu dan seluruh paket " +
                     "yang terpasang di dalamnya (apt, node, python).",
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Button(
@@ -542,7 +611,7 @@ private fun ManagementCard(onRemove: () -> Unit) {
                 )
             ) {
                 Icon(
-                    Icons.Filled.Delete,
+                    Icons.Rounded.Delete,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )

@@ -1,6 +1,11 @@
 package com.openchatai.app.ui.chat
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,9 +13,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,25 +23,34 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Terminal
+import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -48,7 +62,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -57,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.openchatai.app.background.SessionGenState
 import com.openchatai.app.ui.components.StatusDot
+import com.openchatai.app.ui.theme.AppMotion
 import com.openchatai.app.ui.theme.TerminalYellow
 import com.openchatai.app.ui.terminal.TerminalActivity
 import com.openchai.core.agent.PermissionMode
@@ -95,23 +109,27 @@ private fun PermissionMode.chatLabel(): String =
 /**
  * Pusat pengalaman aplikasi: chat AI coding agent (multi-sesi paralel).
  *
- * Struktur (Column):
- *  - Header: tombol menu (drawer "Chats") + ModeSwitcherChip + judul
- *    "Workspace: <nama>" (fallback "Open Chat AI") + aksi agent (ikon tools) +
- *    Terminal (Activity layar penuh terpisah) + menu MoreVert
- *    (Export as Markdown / Settings).
+ * Struktur (Column) — Material Design 3:
+ *  - TopAppBar (containerColor = surface): tombol menu (drawer "Chats") +
+ *    ModeSwitcherChip + judul "Workspace: <nama>" (fallback "Open Chat AI") +
+ *    aksi agent (Bolt) + Terminal (Activity layar penuh terpisah) + menu
+ *    MoreVert (Export as Markdown / Settings).
  *  - Chip selector: Project & Model (buka ModalBottomSheet).
  *  - Banner status kecil (offline / engine fallback) — hanya saat perlu.
  *  - LazyColumn pesan (weight 1f) + EmptyChatState saat kosong + blok streaming
  *    (kartu aktivitas agent + partial answer + TypingIndicator) saat sesi aktif
  *    masih Running di GenerationManager.
- *  - Chip "New messages" saat streaming & user tidak di dekat bawah.
+ *  - Chip "New messages" (AnimatedVisibility fade+expand) saat streaming & user
+ *    tidak di dekat bawah.
  *  - ChatInputBar.
  *  - Sheets: ModelSelectorSheet & ProjectSelectorSheet.
  *
  * Catatan: terminal tidak lagi embedded (dipindah ke TerminalActivity);
  * [onOpenLinuxSetup] dipertahankan demi kompatibilitas call site NavGraph.
+ * TopAppBar dipakai dengan windowInsets nol karena Scaffold di NavGraph sudah
+ * memberikan padding status bar ke konten (mencegah insets dobel).
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     chatViewModel: ChatViewModel,
@@ -225,87 +243,119 @@ fun ChatScreen(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // ---------------- Header ----------------
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Buka drawer "Chats" (daftar sesi).
-            IconButton(onClick = onOpenSessions) {
-                Icon(Icons.Filled.Menu, contentDescription = "Open chats list")
-            }
-            // Mode switcher izin (gaya Claude Code): chip + dropdown radio.
-            ModeSwitcherChip(
-                current = settings.permissionMode,
-                onSelect = chatViewModel::setPermissionMode
-            )
-            // Judul workspace aktif; fallback nama app bila belum ada workspace.
-            Text(
-                text = activeProject?.name?.takeIf { it.isNotBlank() }
-                    ?.let { "Workspace: $it" } ?: "Open Chat AI",
-                style = MaterialTheme.typography.titleLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 4.dp)
-            )
-            // Aksi cepat agent (Fix/Test/Build/...) → runAgentAction.
-            Box {
-                IconButton(onClick = { agentMenuOpen = true }) {
-                    // Ikon tools (kunci inggris) — core icon set (Bolt hanya di extended).
-                    Icon(Icons.Filled.Build, contentDescription = "Agent actions")
+        // ---------------- TopAppBar (header M3 di surface) ----------------
+        TopAppBar(
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Mode switcher izin (gaya Claude Code): chip + dropdown radio.
+                    ModeSwitcherChip(
+                        current = settings.permissionMode,
+                        onSelect = chatViewModel::setPermissionMode
+                    )
+                    // Judul workspace aktif; fallback nama app bila belum ada workspace.
+                    Text(
+                        text = activeProject?.name?.takeIf { it.isNotBlank() }
+                            ?.let { "Workspace: $it" } ?: "Open Chat AI",
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 4.dp)
+                    )
                 }
-                AgentActionsMenu(
-                    expanded = agentMenuOpen,
-                    onDismiss = { agentMenuOpen = false },
-                    onAction = { name ->
-                        agentMenuOpen = false
-                        chatViewModel.runAgentAction(name)
+            },
+            navigationIcon = {
+                // Buka drawer "Chats" (daftar sesi).
+                IconButton(onClick = onOpenSessions) {
+                    Icon(Icons.Rounded.Menu, contentDescription = "Open chats list")
+                }
+            },
+            actions = {
+                // Aksi cepat agent (Fix/Test/Build/...) → runAgentAction.
+                Box {
+                    IconButton(onClick = { agentMenuOpen = true }) {
+                        Icon(
+                            Icons.Rounded.Bolt,
+                            contentDescription = "Agent actions",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                )
-            }
-            // Terminal layar penuh (Activity terpisah, bukan lagi panel embedded).
-            IconButton(onClick = { context.startActivity(TerminalActivity.intent(context)) }) {
-                // Prompt shell "$" — tanpa ikon extended (core set tak punya Terminal).
-                Text(
-                    text = "$",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontFamily = FontFamily.Monospace
-                )
-            }
-            // Menu lainnya: export markdown + settings.
-            Box {
-                IconButton(onClick = { moreMenuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, contentDescription = "More options")
-                }
-                DropdownMenu(expanded = moreMenuOpen, onDismissRequest = { moreMenuOpen = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Export as Markdown") },
-                        onClick = {
-                            moreMenuOpen = false
-                            exportConversationMarkdown()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Settings") },
-                        onClick = {
-                            moreMenuOpen = false
-                            onOpenSettings()
+                    AgentActionsMenu(
+                        expanded = agentMenuOpen,
+                        onDismiss = { agentMenuOpen = false },
+                        onAction = { name ->
+                            agentMenuOpen = false
+                            chatViewModel.runAgentAction(name)
                         }
                     )
                 }
-            }
-        }
+                // Terminal layar penuh (Activity terpisah, bukan lagi panel embedded).
+                IconButton(onClick = { context.startActivity(TerminalActivity.intent(context)) }) {
+                    Icon(
+                        Icons.Rounded.Terminal,
+                        contentDescription = "Open terminal",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                // Menu lainnya: export markdown + settings.
+                Box {
+                    IconButton(onClick = { moreMenuOpen = true }) {
+                        Icon(Icons.Rounded.MoreVert, contentDescription = "More options")
+                    }
+                    DropdownMenu(
+                        expanded = moreMenuOpen,
+                        onDismissRequest = { moreMenuOpen = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Export as Markdown") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.Upload,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            onClick = {
+                                moreMenuOpen = false
+                                exportConversationMarkdown()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Settings") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Rounded.Settings,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            onClick = {
+                                moreMenuOpen = false
+                                onOpenSettings()
+                            }
+                        )
+                    }
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                titleContentColor = MaterialTheme.colorScheme.onSurface,
+                navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ),
+            // Scaffold di NavGraph sudah memberi padding status bar → insets nol.
+            windowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp)
+        )
 
         // ---------------- Selector chips ----------------
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             AssistChip(
@@ -318,9 +368,16 @@ fun ChatScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                 },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.Folder,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
                 trailingIcon = {
                     Icon(
-                        Icons.Filled.ArrowDropDown,
+                        Icons.Rounded.ArrowDropDown,
                         contentDescription = null,
                         modifier = Modifier.size(20.dp)
                     )
@@ -335,9 +392,16 @@ fun ChatScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                 },
+                leadingIcon = {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                },
                 trailingIcon = {
                     Icon(
-                        Icons.Filled.ArrowDropDown,
+                        Icons.Rounded.ArrowDropDown,
                         contentDescription = null,
                         modifier = Modifier.size(20.dp)
                     )
@@ -353,6 +417,7 @@ fun ChatScreen(
         if (engineMessage.contains("unavailable", ignoreCase = true) ||
             engineMessage.contains("fallback", ignoreCase = true)
         ) {
+            // Warna kuning terminal dipertahankan untuk banner engine (kontrak warna).
             StatusBanner(text = engineMessage, dotColor = TerminalYellow)
         }
         // Banner workspace: chat TETAP tampil (pesan & percakapan selalu bisa
@@ -424,7 +489,8 @@ fun ChatScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             SLASH_COMMANDS.forEach { (cmd, prompt) ->
-                AssistChip(
+                // SuggestionChip M3 — chip menyarankan prompt yang mengisi input.
+                SuggestionChip(
                     onClick = { inputText = prompt },
                     label = {
                         Text(
@@ -449,7 +515,14 @@ fun ChatScreen(
         // Muncul hanya saat streaming berjalan dan user TIDAK di dekat bawah
         // (auto-follow sengaja tidak memaksa scroll). Tap → lompat ke item
         // terakhir; karena posisi kembali di bawah, follow aktif lagi otomatis.
-        if (streamingVisible && !atBottom) {
+        // Muncul/hilang dengan motion M3: fade + expand/shrink vertikal.
+        AnimatedVisibility(
+            visible = streamingVisible && !atBottom,
+            enter = fadeIn(AppMotion.standardTween()) +
+                expandVertically(AppMotion.standardTween()),
+            exit = fadeOut(AppMotion.standardTween()) +
+                shrinkVertically(AppMotion.standardTween())
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -465,7 +538,7 @@ fun ChatScreen(
                     },
                     leadingIcon = {
                         Icon(
-                            Icons.Filled.KeyboardArrowDown,
+                            Icons.Rounded.KeyboardArrowDown,
                             contentDescription = null,
                             modifier = Modifier.size(18.dp)
                         )
@@ -514,15 +587,15 @@ fun ChatScreen(
     }
 }
 
-/** Banner status kecil: Surface + StatusDot + teks. */
+/** Banner status kecil: Surface tonal (shapes.small) + StatusDot + teks. */
 @Composable
 private fun StatusBanner(text: String, dotColor: Color) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -540,9 +613,9 @@ private fun StatusBanner(text: String, dotColor: Color) {
 }
 
 /**
- * Mode switcher izin di header (dekat tombol menu): AssistChip berlabel mode
- * saat ini + panah → DropdownMenu 4 opsi dengan leading radio. Pilihan
- * diteruskan ke [ChatViewModel.setPermissionMode] (persist di AppSettings).
+ * Mode switcher izin di TopAppBar: AssistChip berlabel mode saat ini + panah
+ * → DropdownMenu 4 opsi dengan leading radio. Pilihan diteruskan ke
+ * [ChatViewModel.setPermissionMode] (persist di AppSettings).
  * Tidak memakai SegmentedButton (kompatibilitas material3).
  */
 @Composable
@@ -560,7 +633,7 @@ private fun ModeSwitcherChip(current: PermissionMode, onSelect: (PermissionMode)
             },
             trailingIcon = {
                 Icon(
-                    Icons.Filled.ArrowDropDown,
+                    Icons.Rounded.ArrowDropDown,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )
@@ -588,7 +661,7 @@ private fun ModeSwitcherChip(current: PermissionMode, onSelect: (PermissionMode)
 }
 
 /**
- * Menu aksi cepat agent (anchor: ikon tools di header). Setiap item meneruskan
+ * Menu aksi cepat agent (anchor: ikon Bolt di TopAppBar). Setiap item meneruskan
  * NAMA aksi persis ("Fix", "Test", dst.) ke [ChatViewModel.runAgentAction] —
  * eksekusinya (prompt agent + sesi) diimplementasi MAIN (kontrak Task 11).
  */
@@ -611,6 +684,7 @@ internal fun AgentActionsMenu(
 /**
  * Kartu plan approval: tampil setelah run PLAN mode selesai (vm.planApproval).
  * Approve menaikkan mode ke AUTO_READ_EDIT lalu run ulang sesi aktif.
+ * ElevatedCard M3 + tombol konfirmasi berikon Check.
  */
 @Composable
 private fun PlanApprovalCard(
@@ -634,6 +708,12 @@ private fun PlanApprovalCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(onClick = onApprove) {
+                    Icon(
+                        imageVector = Icons.Rounded.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
                     Text("Approve & Execute")
                 }
                 TextButton(onClick = onDismiss) {
@@ -660,8 +740,8 @@ private fun WorkspaceBanner(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
-        shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.secondaryContainer
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),

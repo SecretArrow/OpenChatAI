@@ -1,6 +1,5 @@
 package com.openchatai.app.ui.chat
 
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -20,8 +19,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.openchatai.app.ui.theme.AppMotion
 
-/** Tiga titik kecil dengan alpha beranimasi (stagger) — tanda agent sedang mengetik. */
+/**
+ * Tiga titik kecil dengan alpha beranimasi (stagger) — tanda agent sedang mengetik.
+ * Durasi & easing memakai token motion Material Design 3 dari [AppMotion]
+ * (durasi MEDIUM + stagger SHORT per titik, kurva easing standar M3).
+ */
 @Composable
 fun TypingIndicator(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "typing")
@@ -36,9 +40,9 @@ fun TypingIndicator(modifier: Modifier = Modifier) {
                 targetValue = 0.9f,
                 animationSpec = infiniteRepeatable(
                     animation = tween(
-                        durationMillis = 450,
-                        delayMillis = 150 * index,
-                        easing = LinearEasing
+                        durationMillis = AppMotion.MEDIUM_DURATION,
+                        delayMillis = AppMotion.SHORT_DURATION * index,
+                        easing = AppMotion.StandardEasing
                     ),
                     repeatMode = RepeatMode.Reverse
                 ),

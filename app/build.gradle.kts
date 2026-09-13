@@ -16,8 +16,8 @@ android {
         // execve() binary di app data untuk targetSdk >= 29 — rootfs Linux
         // (apt/node/python) dieksekusi proot dari app data. compileSdk tetap 34.
         targetSdk = 28
-        versionCode = 12
-        versionName = "1.9.1"
+        versionCode = 13
+        versionName = "1.10.0"
         vectorDrawables { useSupportLibrary = true }
 
         ndk {

@@ -7,25 +7,31 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -43,7 +49,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.openchatai.app.ui.components.StatusDot
 import com.openchai.core.mcp.McpHealth
 import com.openchai.core.mcp.McpHealthStatus
 import com.openchai.core.mcp.McpManagerProvider
@@ -53,9 +58,17 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 
 /**
- * Section "MCP SERVERS" untuk Settings (standalone, di-embed oleh SettingsScreen):
- * daftar server (nama, transport badge, status dot, jumlah tools), toggle enable,
+ * Section "MCP Servers" untuk Settings (standalone, di-embed oleh SettingsScreen):
+ * daftar server (nama, transport, status chip, jumlah tools), toggle enable,
  * Test/Edit/Delete, dan dialog tambah/ubah server (HTTP streamable / STDIO).
+ *
+ * Overhaul Material 3 (visual-only — kontrak & logika tidak berubah):
+ * - Satu OutlinedCard per server (shape large).
+ * - Badge status FilterChip: ikon CheckCircle (secondary) saat konek,
+ *   Sync (tertiary) saat menyambung, Close (outline) saat putus,
+ *   WarningAmber (error) saat gagal.
+ * - Aksi edit/hapus sebagai IconButton onSurfaceVariant; tombol tambah
+ *   FilledTonalButton.
  */
 @Composable
 fun McpSettingsSection(modifier: Modifier = Modifier) {
@@ -71,57 +84,81 @@ fun McpSettingsSection(modifier: Modifier = Modifier) {
     var testResults by remember { mutableStateOf<Map<String, Pair<Boolean, String>>>(emptyMap()) }
 
     Column(modifier = modifier.fillMaxWidth()) {
+        // Judul seksi — konsisten dengan SectionCard di SettingsScreen.
         Text(
-            "MCP SERVERS",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            "MCP Servers",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(start = 4.dp, bottom = 12.dp)
         )
-        ElevatedCard(shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                if (configs.isEmpty()) {
-                    Text(
-                        "Belum ada server MCP. Tambahkan server HTTP (streamable) " +
-                            "atau STDIO (proses lokal) agar agent bisa memakai tool eksternal.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                configs.forEach { config ->
-                    McpServerRow(
-                        config = config,
-                        health = health[config.id] ?: McpHealth(),
-                        testing = testingId == config.id,
-                        testResult = testResults[config.id],
-                        onToggle = { enabled -> manager.update(config.copy(enabled = enabled)) },
-                        onTest = {
-                            scope.launch {
-                                testingId = config.id
-                                val result = manager.testServer(config)
-                                val message = result.fold(
-                                    onSuccess = { true to it },
-                                    onFailure = { false to (it.message ?: "Failed") }
-                                )
-                                testResults = testResults + (config.id to message)
-                                testingId = null
-                            }
-                        },
-                        onEdit = { editing = fromConfig(config) },
-                        onDelete = {
-                            manager.remove(config.id)
-                            testResults = testResults - config.id
-                        }
-                    )
-                }
-                TextButton(onClick = { editing = ServerFormState() }) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Add MCP server")
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (configs.isEmpty()) {
+                // Kartu hint saat belum ada server terdaftar.
+                OutlinedCard(
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            "Belum ada server MCP. Tambahkan server HTTP (streamable) " +
+                                "atau STDIO (proses lokal) agar agent bisa memakai tool eksternal.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
+            configs.forEach { config ->
+                // Satu OutlinedCard per server (pola kartu M3).
+                OutlinedCard(
+                    shape = MaterialTheme.shapes.large,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        McpServerRow(
+                            config = config,
+                            health = health[config.id] ?: McpHealth(),
+                            testing = testingId == config.id,
+                            testResult = testResults[config.id],
+                            onToggle = { enabled -> manager.update(config.copy(enabled = enabled)) },
+                            onTest = {
+                                scope.launch {
+                                    testingId = config.id
+                                    val result = manager.testServer(config)
+                                    val message = result.fold(
+                                        onSuccess = { true to it },
+                                        onFailure = { false to (it.message ?: "Failed") }
+                                    )
+                                    testResults = testResults + (config.id to message)
+                                    testingId = null
+                                }
+                            },
+                            onEdit = { editing = fromConfig(config) },
+                            onDelete = {
+                                manager.remove(config.id)
+                                testResults = testResults - config.id
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        // Aksi tambah server — FilledTonalButton M3.
+        FilledTonalButton(onClick = { editing = ServerFormState() }) {
+            Icon(
+                Icons.Rounded.Add,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text("Add MCP server")
         }
     }
 
@@ -152,13 +189,17 @@ private fun McpServerRow(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // Identitas server + toggle enable (Switch M3).
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(config.name, style = MaterialTheme.typography.bodyLarge)
+                Text(config.name, style = MaterialTheme.typography.titleMedium)
                 Text(
                     summaryOf(config),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -166,21 +207,27 @@ private fun McpServerRow(
             }
             Switch(checked = config.enabled, onCheckedChange = onToggle)
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            StatusDot(color = healthColor(health.status, MaterialTheme.colorScheme.error))
-            Text(
-                statusText(health, config),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (health.status == McpHealthStatus.ERROR) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
-            )
-        }
+        // Badge status M3: FilterChip dengan ikon & warna sesuai kondisi health.
+        FilterChip(
+            selected = false,
+            onClick = { /* badge status — penanda saja, tanpa aksi */ },
+            label = {
+                Text(
+                    statusText(health, config),
+                    style = MaterialTheme.typography.labelMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    statusIcon(health.status),
+                    contentDescription = null,
+                    tint = statusTint(health.status),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        )
         if (health.status == McpHealthStatus.ERROR && !health.message.isNullOrBlank()) {
             Text(
                 health.message,
@@ -208,14 +255,19 @@ private fun McpServerRow(
                     )
                 }
             }
+            // Aksi edit/hapus — IconButton dengan tint onSurfaceVariant (M3).
             IconButton(onClick = onEdit) {
-                Icon(Icons.Filled.Edit, contentDescription = "Edit ${config.name}")
+                Icon(
+                    Icons.Rounded.Edit,
+                    contentDescription = "Edit ${config.name}",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             IconButton(onClick = onDelete) {
                 Icon(
-                    Icons.Filled.Delete,
+                    Icons.Rounded.Delete,
                     contentDescription = "Delete ${config.name}",
-                    tint = MaterialTheme.colorScheme.error
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -245,6 +297,7 @@ private fun McpServerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = MaterialTheme.shapes.extraLarge,
         title = { Text(if (form.id.isBlank()) "Add MCP server" else "Edit MCP server") },
         text = {
             Column(
@@ -310,11 +363,15 @@ private fun McpServerDialog(
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth()
                 )
+                // Toggle enable memakai Switch M3 (menggantikan Checkbox).
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { enabled = !enabled }
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { enabled = !enabled }
                 ) {
-                    Checkbox(checked = enabled, onCheckedChange = { enabled = it })
+                    Switch(checked = enabled, onCheckedChange = { enabled = it })
+                    Spacer(Modifier.width(12.dp))
                     Text("Enabled", style = MaterialTheme.typography.bodyMedium)
                 }
             }
@@ -334,6 +391,8 @@ private fun TransportDropdown(selected: McpTransport, onSelect: (McpTransport) -
     Box {
         OutlinedButton(onClick = { expanded = true }) {
             Text(transportLabel(selected))
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Rounded.ArrowDropDown, contentDescription = null)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             McpTransport.entries.forEach { option ->
@@ -447,10 +506,22 @@ private fun statusText(health: McpHealth, config: McpServerConfig): String {
     return "${if (config.transport == McpTransport.HTTP) "HTTP" else "STDIO"} · $base"
 }
 
-/** Warna status dot: hijau konek, kuning nyambung, abu putus, merah error. */
-private fun healthColor(status: McpHealthStatus, error: Color): Color = when (status) {
-    McpHealthStatus.CONNECTED -> Color(0xFF4CAF50)
-    McpHealthStatus.CONNECTING -> Color(0xFFFFB300)
-    McpHealthStatus.DISCONNECTED -> Color(0xFF9E9E9E)
-    McpHealthStatus.ERROR -> error
+/** Ikon status badge sesuai kondisi health server MCP (semua dari set Rounded). */
+private fun statusIcon(status: McpHealthStatus) = when (status) {
+    McpHealthStatus.CONNECTED -> Icons.Rounded.CheckCircle
+    McpHealthStatus.CONNECTING -> Icons.Rounded.Sync
+    McpHealthStatus.DISCONNECTED -> Icons.Rounded.Close
+    McpHealthStatus.ERROR -> Icons.Rounded.WarningAmber
+}
+
+/**
+ * Warna status badge dari colorScheme M3 (tanpa literal warna):
+ * teal = konek, peach = menyambung, outline = putus, error = gagal.
+ */
+@Composable
+private fun statusTint(status: McpHealthStatus): Color = when (status) {
+    McpHealthStatus.CONNECTED -> MaterialTheme.colorScheme.secondary
+    McpHealthStatus.CONNECTING -> MaterialTheme.colorScheme.tertiary
+    McpHealthStatus.DISCONNECTED -> MaterialTheme.colorScheme.outline
+    McpHealthStatus.ERROR -> MaterialTheme.colorScheme.error
 }

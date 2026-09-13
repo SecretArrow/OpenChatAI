@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SuggestionChip
@@ -28,7 +28,12 @@ private val SUGGESTIONS = listOf(
     "Fix a bug in my project"
 )
 
-/** Tampilan saat percakapan masih kosong: brand, tagline, dan chip saran prompt. */
+/**
+ * Tampilan saat percakapan masih kosong — hero center gaya Material Design 3:
+ *  - Ikon Rounded.SmartToy besar dalam lingkaran primaryContainer.
+ *  - Judul headlineSmall + deskripsi bodyMedium onSurfaceVariant.
+ *  - SuggestionChip M3 untuk contoh prompt (langsung mengisi chat via onSuggestion).
+ */
 @Composable
 fun EmptyChatState(onSuggestion: (String) -> Unit, modifier: Modifier = Modifier) {
     Column(
@@ -38,18 +43,23 @@ fun EmptyChatState(onSuggestion: (String) -> Unit, modifier: Modifier = Modifier
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        // Lingkaran tonal primaryContainer berisi ikon brand (SmartToy).
         Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-            Box(modifier = Modifier.padding(18.dp), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.padding(20.dp), contentAlignment = Alignment.Center) {
                 Icon(
-                    imageVector = Icons.Filled.Send,
+                    imageVector = Icons.Rounded.SmartToy,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(40.dp)
                 )
             }
         }
         Spacer(Modifier.height(20.dp))
-        Text(text = "Open Chat AI", style = MaterialTheme.typography.titleLarge)
+        Text(
+            text = "Open Chat AI",
+            style = MaterialTheme.typography.headlineSmall,
+            color = MaterialTheme.colorScheme.onSurface
+        )
         Spacer(Modifier.height(6.dp))
         Text(
             text = "Your AI coding agent — ask anything, attach files, " +

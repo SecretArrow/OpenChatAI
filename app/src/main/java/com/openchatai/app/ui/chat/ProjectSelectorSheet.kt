@@ -11,10 +11,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -22,13 +24,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.openchai.core.model.Project
 
 /**
- * Project selector cepat dari Chat. Kelola proyek (rename/delete/import)
- * ada di halaman Projects.
+ * Project selector cepat dari Chat — Material Design 3: ModalBottomSheet
+ * (dragHandle default) berisi ListItem per proyek; proyek aktif ditandai ikon
+ * CheckCircle primary. Kelola proyek (rename/delete/import) ada di halaman
+ * Projects.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,28 +53,36 @@ fun ProjectSelectorSheet(
             Spacer(Modifier.height(12.dp))
             LazyColumn(modifier = Modifier.fillMaxWidth().height(320.dp)) {
                 items(projects, key = { it.id }) { project: Project ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                    ListItem(
+                        headlineContent = {
+                            Text(project.name, style = MaterialTheme.typography.titleMedium)
+                        },
+                        supportingContent = {
+                            Text(
+                                project.path,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        trailingContent = {
+                            if (active?.id == project.id) {
+                                // Penanda proyek aktif — ikon M3, bukan teks "●".
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Active project",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        },
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
                                 vm.selectProject(project)
                                 onDismiss()
                             }
-                            .padding(vertical = 10.dp)
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(project.name, style = MaterialTheme.typography.titleMedium)
-                            Text(
-                                project.path,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        if (active?.id == project.id) {
-                            Text("●", color = MaterialTheme.colorScheme.primary)
-                        }
-                    }
+                    )
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -77,8 +90,12 @@ fun ProjectSelectorSheet(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Button(onClick = { onDismiss(); onManageProjects() }) {
-                    Icon(Icons.Filled.Add, contentDescription = null)
+                // Aksi utama sheet — tombol tonal M3 dengan ikon Add.
+                FilledTonalButton(onClick = { onDismiss(); onManageProjects() }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = null
+                    )
                     Spacer(Modifier.width(6.dp))
                     Text("New / manage projects")
                 }
